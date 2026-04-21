@@ -1,7 +1,5 @@
 # `src_python` 实验代码说明
 
-本目录是对 `src_backup_origin` 中原始实验代码的 Python 重写版本，目标是保持原实验中的模型构建方式、时延/可靠性计算逻辑、主算法与各基线算法的行为一致。
-
 ## 1. 目录组成
 
 ```text
@@ -28,7 +26,7 @@ src_python/
 
 ### 2.1 数据模型
 
-文件: [models.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/models.py:1)
+文件: models.py
 
 定义实验中的基础对象：
 
@@ -40,7 +38,7 @@ src_python/
 
 ### 2.2 DAG 生成器
 
-文件: [core/dag_generator.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/core/dag_generator.py:1)
+文件: core/dag_generator.py
 
 对应原始代码中的 `T.java`，负责：
 
@@ -54,7 +52,7 @@ src_python/
 
 ### 2.3 拓扑与 DNN 任务生成
 
-文件: [core/topology.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/core/topology.py:1)
+文件: core/topology.py
 
 对应原始代码中的 `CreateNode.java`，负责：
 
@@ -71,7 +69,7 @@ src_python/
 
 ### 2.4 共享实验环境
 
-文件: [core/environment.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/core/environment.py:1)
+文件: core/environment.py
 
 这是整个实验的共享核心，对应原始代码中的：
 
@@ -100,7 +98,7 @@ src_python/
 
 ### 2.5 指标结构
 
-文件: [metrics.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/metrics.py:1)
+文件: metrics.py
 
 定义 `ExperimentMetrics`，统一封装实验输出：
 
@@ -114,7 +112,7 @@ src_python/
 
 ### 3.1 主算法与三类基线
 
-文件: [proposed.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/proposed.py:1)
+文件: proposed.py
 
 对应原始代码中的 `ALLDNN.java`。
 
@@ -145,13 +143,13 @@ src_python/
 
 ### 3.2 RTBL 基线
 
-目录: [rtbl](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/rtbl)
+目录: [rtbl]
 
 对应原始代码中的 `src_backup_origin/RTBL_DNNs/`。
 
 #### 配置
 
-文件: [rtbl/config.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/rtbl/config.py:1)
+文件: [rtbl/config.py]
 
 定义 `SimulationConfig`，包括：
 
@@ -163,7 +161,7 @@ src_python/
 
 #### 节点选择器
 
-文件: [rtbl/sota_selector.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/rtbl/sota_selector.py:1)
+文件: [rtbl/sota_selector.py]
 
 定义 `SOTASelector`，负责：
 
@@ -174,7 +172,7 @@ src_python/
 
 #### 在线调度器
 
-文件: [rtbl/scheduler.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/rtbl/scheduler.py:1)
+文件: [rtbl/scheduler.py]
 
 定义：
 
@@ -196,7 +194,7 @@ src_python/
 
 ### 4.1 全局入口
 
-文件: [runner.py](/Users/hlz/Documents/Project/DNN inference reliability optim/code filing/experiments/algorithms/src_python/runner.py:1)
+文件: [runner.py]
 
 统一命令行入口：
 
