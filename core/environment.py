@@ -5,8 +5,8 @@ import random
 from dataclasses import dataclass
 from typing import List
 
-from src_python.core.topology import create_dnns, create_nodes
-from src_python.models import DNN, LinkDNN, LinkNode, Node, Task
+from core.topology import create_dnns, create_nodes
+from models import DNN, LinkDNN, LinkNode, Node, Task
 
 
 @dataclass

@@ -3,8 +3,8 @@ from __future__ import annotations
 import random
 from typing import List, Tuple
 
-from src_python.core.dag_generator import DAGGenerator
-from src_python.models import DNN, LinkDNN, LinkNode, Node, Task
+from core.dag_generator import DAGGenerator
+from models import DNN, LinkDNN, LinkNode, Node, Task
 
 
 def create_dnns(num: int, nodes: List[Node]) -> List[DNN]:
@@ -215,4 +215,3 @@ def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
             nodes.append(user_node)
 
     return nodes, link_nodes
-

@@ -5,9 +5,9 @@ import random
 import time
 from typing import List
 
-from src_python.core.environment import Environment
-from src_python.metrics import ExperimentMetrics
-from src_python.models import DNN, LinkNode, Node
+from core.environment import Environment
+from metrics import ExperimentMetrics
+from models import DNN, LinkNode, Node
 
 
 def _java_div(numerator: float, denominator: float) -> float:

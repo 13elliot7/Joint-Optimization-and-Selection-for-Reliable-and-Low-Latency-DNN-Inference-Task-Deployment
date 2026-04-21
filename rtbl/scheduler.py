@@ -3,10 +3,10 @@ from __future__ import annotations
 import math
 from typing import List
 
-from src_python.core.environment import Environment
-from src_python.metrics import ExperimentMetrics
-from src_python.rtbl.config import SimulationConfig
-from src_python.rtbl.sota_selector import SOTASelector
+from core.environment import Environment
+from metrics import ExperimentMetrics
+from rtbl.config import SimulationConfig
+from rtbl.sota_selector import SOTASelector
 
 
 class RTBLScheduler:
@@ -143,4 +143,3 @@ class RTBLRunner:
             failure_count=failure_dnn,
             runtime_ms=int((__import__("time").monotonic() - run_time) * 1000),
         )
-

@@ -290,15 +290,15 @@ runner.main()
 
 ## 5. 运行方式
 
-在项目根目录执行：
+在 `src_python/` 目录执行：
 
 ```bash
-python -m src_python.runner --algorithm proposed
-python -m src_python.runner --algorithm random
-python -m src_python.runner --algorithm maxresource
-python -m src_python.runner --algorithm localfirst
-python -m src_python.runner --algorithm rtbl
-python -m src_python.runner --algorithm all
+python runner.py --algorithm proposed
+python runner.py --algorithm random
+python runner.py --algorithm maxresource
+python runner.py --algorithm localfirst
+python runner.py --algorithm rtbl
+python runner.py --algorithm all
 ```
 
 可选参数：
@@ -308,8 +308,8 @@ python -m src_python.runner --algorithm all
 
 示例：
 
-```bash
-python -m src_python.runner --algorithm proposed --tmax 1 --iteration-limit 120
+python runner.py --algorithm proposed
+python runner.py --algorithm proposed --tmax 1 --iteration-limit 120
 ```
 
 ## 6. 代码组织原则

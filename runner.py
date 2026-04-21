@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 
-from src_python.core.environment import Environment
-from src_python.proposed import AllDNNRefactor
-from src_python.rtbl.scheduler import RTBLRunner
+from core.environment import Environment
+from proposed import AllDNNRefactor
+from rtbl.scheduler import RTBLRunner
 
 
 def print_metrics(name: str, metrics) -> None:
