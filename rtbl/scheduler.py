@@ -11,6 +11,7 @@ from rtbl.sota_selector import SOTASelector
 
 class RTBLScheduler:
     def __init__(self, config: SimulationConfig, rj_history: List[List[int]], env: Environment) -> None:
+        """初始化 RTBL 调度器的在线估计状态。"""
         self.config = config
         self.env = env
         self.m = config.M
@@ -29,12 +30,14 @@ class RTBLScheduler:
         self.selector = SOTASelector(self.m, self.lambda_a, self.lambda_r, self.v)
 
     def _initialize_rj_bar(self, rj_history: List[List[int]]) -> List[float]:
+        """根据历史可用性样本初始化经验均值。"""
         result = [0.0 for _ in range(self.m)]
         for j in range(self.m):
             result[j] = sum(rj_history[j]) / self.h_off
         return result
 
     def update_rj_tilde(self, t: int) -> None:
+        """按 UCB 风格公式更新保守可用性估计。"""
         r0 = self.r_max - self.r_min
         for j in range(self.m):
             if self.hj[j] > 0:
@@ -44,9 +47,11 @@ class RTBLScheduler:
                 self.rj_tilde[j] = self.r_min
 
     def reset_q(self) -> None:
+        """重置当前 DNN 的排队代价累积量。"""
         self.q = 0.0
 
     def step(self, dnn_index: int, task_index: int, x: List[List[int]], a_j: List[float], rj_t: List[int]) -> List[int] | None:
+        """为当前任务选择一个满足约束的节点集合。"""
         self.update_rj_tilde(task_index)
         d_j = self.env.calculate_task_delay_costs(dnn_index, task_index, x)
         xij_t = self.selector.select_multiple(a_j, self.rj_tilde, self.q, d_j, self.env.ds[dnn_index].getDelay())
@@ -77,6 +82,7 @@ class RTBLScheduler:
 
 class RTBLRunner:
     def __init__(self, config: SimulationConfig | None = None) -> None:
+        """构建 RTBL 实验运行器及其环境。"""
         self.config = config or SimulationConfig()
         self.env = Environment(
             t_max=self.config.tMax,
@@ -96,6 +102,7 @@ class RTBLRunner:
         self.scheduler = RTBLScheduler(self.config, self.env.rj_history, self.env)
 
     def run(self) -> ExperimentMetrics:
+        """按 RTBL 逻辑依次部署全部 DNN 并统计结果。"""
         t_res = 0.0
         r_res = 0.0
         a_res = 0.0

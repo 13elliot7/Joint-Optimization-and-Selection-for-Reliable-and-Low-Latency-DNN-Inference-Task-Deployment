@@ -11,6 +11,7 @@ from models import DNN, LinkNode, Node
 
 
 def _java_div(numerator: float, denominator: float) -> float:
+    """按 Java 风格处理零除场景的除法。"""
     if denominator == 0:
         if numerator == 0:
             return math.nan
@@ -20,6 +21,7 @@ def _java_div(numerator: float, denominator: float) -> float:
 
 class AllDNNRefactor:
     def __init__(self, env: Environment | None = None) -> None:
+        """初始化主算法与三个基线共享的运行状态。"""
         self.env = env or Environment()
         self.pop_size = 60
         self.gen = 1000
@@ -38,12 +40,14 @@ class AllDNNRefactor:
         self.distance = [[0 for _ in range(2 * self.pop_size)] for _ in range(1000)]
 
     def _new_population(self, population_size: int) -> List[List[List[int]]]:
+        """创建指定规模的三维种群容器。"""
         return [
             [[0 for _ in range(self.max_dnn_num)] for _ in range(len(self.env.ds))]
             for _ in range(population_size)
         ]
 
     def _build_assignment_matrix(self, dnn_index: int, assignment: List[int]) -> List[List[int]]:
+        """把一维部署向量展开成任务-节点二维矩阵。"""
         task_count = len(self.env.ds[dnn_index].tasks)
         x = [[0 for _ in range(len(self.env.nodes))] for _ in range(task_count)]
         for task_idx in range(task_count):
@@ -53,7 +57,46 @@ class AllDNNRefactor:
             x[task_idx][node_idx] = 1
         return x
 
+    def _assignment_slice(self, dnn_index: int, assignment: List[int]) -> List[int]:
+        """截取当前 DNN 实际使用长度的部署向量。"""
+        return list(assignment[: len(self.env.ds[dnn_index].tasks)])
+
+    def _evaluate_assignment(self, dnn_index: int, assignment: List[int]) -> tuple[float, float, float, float]:
+        """计算一个候选部署的三目标值与估计时延。"""
+        # 所有算法统一复用这套动态评价：当前节点/链路可靠性
+        # 加上基于原始关键路径估计得到的时延收益。
+        assignment_slice = self._assignment_slice(dnn_index, assignment)
+        value1 = float(self.env.count_dynamic_accuracy_by_assignment(dnn_index, assignment_slice))
+        value2 = float(self.env.count_dynamic_operation_by_assignment(dnn_index, assignment_slice))
+        delay = self.env.estimate_delay_from_assignment(dnn_index, assignment_slice)
+        if delay > self.env.ds[dnn_index].delay:
+            value3 = float(self.env.ds[dnn_index].delay - delay)
+        else:
+            value3 = float(1 / delay)
+        return value1, value2, value3, delay
+
+    def _register_running_dnn(self, dnn_index: int, assignment: List[int], delay: float) -> None:
+        """把已接纳的 DNN 注册成时隙级运行实体。"""
+        # DNN 被接纳后不再是“部署即结束”，而是转成一个运行块，
+        # 在若干个时隙内持续占用资源。
+        assignment_slice = self._assignment_slice(dnn_index, assignment)
+        remaining_slots = max(1, math.ceil(delay / self.env.slot_length))
+        self.env.add_running_dnn(
+            dnn_index=dnn_index,
+            assignment=assignment_slice,
+            arrival_time=self.env.current_slot,
+            start_time=self.env.current_slot,
+            estimated_runtime=delay,
+            remaining_slots=remaining_slots,
+        )
+
+    def _advance_until_drained(self) -> None:
+        """在没有新任务时推进系统直到运行队列清空。"""
+        while self.env.running_dnns:
+            self.env.advance_time_slot()
+
     def mutate(self, i: int, m: int) -> None:
+        """对指定个体执行一次随机变异。"""
         rate = random.random()
         dnn = self.env.ds[i]
         xs = self._build_assignment_matrix(i, self.res[m][i])
@@ -70,6 +113,7 @@ class AllDNNRefactor:
                 xs[x][y] = 0
 
     def cross_over1(self, i: int, m: int, n: int, next_index: int) -> None:
+        """执行按后缀交换的交叉操作。"""
         dnn = self.env.ds[i]
         d_m = len(dnn.tasks)
         self.start_time = time.monotonic()
@@ -101,6 +145,7 @@ class AllDNNRefactor:
             self.res_pq[next_index][i][x] = self.res[n][i][x]
 
     def cross_over(self, i: int, m: int, n: int, next_index: int) -> None:
+        """执行按单点交换的交叉操作。"""
         dnn = self.env.ds[i]
         d_m = len(dnn.tasks)
         d_n = len(dnn.tasks)
@@ -138,37 +183,19 @@ class AllDNNRefactor:
             self.res_pq[next_index][i][x] = self.res[n][i][x]
 
     def count_values1(self, i: int, m: int) -> None:
-        x = [
-            [[0 for _ in range(len(self.env.nodes))] for _ in range(len(self.env.ds[i].tasks))]
-            for _ in range(i + 1)
-        ]
-        for j in range(len(self.env.ds[i].tasks)):
-            x[i][j][self.res_pq[m][i][j]] = 1
-        self.function1_values[m] = float(self.env.count_accuracy(self.env.ds[i], i, x))
+        """计算第一个目标值并写回缓存。"""
+        self.function1_values[m] = self._evaluate_assignment(i, self.res_pq[m][i])[0]
 
     def count_values2(self, i: int, m: int) -> None:
-        x = [
-            [[0 for _ in range(len(self.env.nodes))] for _ in range(len(self.env.ds[i].tasks))]
-            for _ in range(i + 1)
-        ]
-        for j in range(len(self.env.ds[i].tasks)):
-            x[i][j][self.res_pq[m][i][j]] = 1
-        self.function2_values[m] = float(self.env.count_operation(self.env.ds[i], i, x))
+        """计算第二个目标值并写回缓存。"""
+        self.function2_values[m] = self._evaluate_assignment(i, self.res_pq[m][i])[1]
 
     def count_values3(self, i: int, m: int) -> None:
-        x = [
-            [[0 for _ in range(len(self.env.nodes))] for _ in range(len(self.env.ds[i].tasks))]
-            for _ in range(i + 1)
-        ]
-        for j in range(len(self.env.ds[i].tasks)):
-            x[i][j][self.res_pq[m][i][j]] = 1
-        delay = self.env.count_delay(self.env.ds[i], x)
-        if delay > self.env.ds[i].delay:
-            self.function3_values[m] = float(self.env.ds[i].delay - delay)
-            return
-        self.function3_values[m] = float(1 / delay)
+        """计算第三个目标值并写回缓存。"""
+        self.function3_values[m] = self._evaluate_assignment(i, self.res_pq[m][i])[2]
 
     def dominated_sort(self, o: int) -> None:
+        """对当前种群执行非支配排序。"""
         rank = 1
         x = [[0 for _ in range(2 * self.pop_size)] for _ in range(2 * self.pop_size)]
         y = 0
@@ -205,6 +232,7 @@ class AllDNNRefactor:
             rank += 1
 
     def get_res(self, i: int, pq: List[List[List[int]]], values1: List[float], values2: List[float], values3: List[float]) -> List[List[int]]:
+        """按拥挤距离规则计算同层个体的距离值。"""
         v1 = list(range(len(values1)))
         v2 = list(range(len(values2)))
         v3 = list(range(len(values3)))
@@ -241,6 +269,7 @@ class AllDNNRefactor:
         return self.distance
 
     def update_res(self, pq: List[List[List[int]]], rank: List[List[int]], dis: List[List[int]], i: int) -> None:
+        """根据排序层级和距离更新下一代种群。"""
         index = 0
         level = 1
         has = [0 for _ in range(len(pq))]
@@ -273,6 +302,7 @@ class AllDNNRefactor:
                 level += 1
 
     def _score(self, value1: float, value2: float, value3: float, w_a: float, w_r: float, w_t: float, min_a: float, max_a: float, min_r: float, max_r: float, min_t: float, max_t: float) -> float:
+        """对满足时延的候选解做归一化加权打分。"""
         return (
             w_a * _java_div(value1 - min_a, max_a - min_a)
             + w_r * _java_div(value2 - min_r, max_r - min_r)
@@ -280,6 +310,7 @@ class AllDNNRefactor:
         )
 
     def run_proposed(self) -> ExperimentMetrics:
+        """运行主算法并输出平均指标。"""
         max_a = 1.0
         max_r = 1.0
         max_t = 2000.0
@@ -288,15 +319,22 @@ class AllDNNRefactor:
         min_t = 200.0
         self.res = self._new_population(self.pop_size)
         self.res_next = self._new_population(self.pop_size)
-        t = 0
         t_res = 0.0
         r_res = 0.0
         a_res = 0.0
         failure_dnn = 0
+        success_dnn = 0
         run_time = time.monotonic()
-        while t < self.env.t_max:
-            best_res = [[0 for _ in range(self.max_dnn_num)] for _ in range(len(self.env.ds))]
+        next_dnn_index = 0
+        while next_dnn_index < self.env.t_max or self.env.running_dnns:
+            # 当所有 DNN 都已到达后，只需要继续推进系统，
+            # 直到已接纳的运行中 DNN 全部执行完成。
+            if next_dnn_index >= self.env.t_max:
+                self.env.advance_time_slot()
+                continue
+            t = next_dnn_index
             best_value = [0.0, 0.0, -1.0]
+            best_assignment = [0 for _ in range(self.max_dnn_num)]
             self.res = self._new_population(self.pop_size)
             self.res_next = self._new_population(self.pop_size)
             self.function1_values = [0.0 for _ in range(2 * self.pop_size)]
@@ -404,9 +442,8 @@ class AllDNNRefactor:
                         < self._score(self.function1_values[bi], self.function2_values[bi], self.function3_values[bi], w_a, w_r, w_t, min_a, max_a, min_r, max_r, min_t, max_t)
                     )
                 ):
-                    for i in range(len(self.env.ds)):
-                        for j in range(len(self.env.ds[t].tasks)):
-                            best_res[i][j] = self.res_pq[bi][i][j]
+                    for j in range(len(self.env.ds[t].tasks)):
+                        best_assignment[j] = self.res_pq[bi][t][j]
                     best_value[0] = self.function1_values[bi]
                     best_value[1] = self.function2_values[bi]
                     best_value[2] = self.function3_values[bi]
@@ -416,8 +453,9 @@ class AllDNNRefactor:
                 self.update_res(self.res_pq, self.pareto_level_sort, self.distance, t)
                 index += 1
             if o == 1:
-                t += 1
                 failure_dnn += 1
+                next_dnn_index += 1
+                self.env.advance_time_slot()
                 continue
             self.res_pq = self._new_population(self.pop_size)
             self.res_pq = self.res
@@ -440,24 +478,30 @@ class AllDNNRefactor:
                     < self._score(self.function1_values[best_i], self.function2_values[best_i], self.function3_values[best_i], w_a, w_r, w_t, min_a, max_a, min_r, max_r, min_t, max_t)
                 )
             ):
-                for i in range(len(self.env.ds)):
-                    for j in range(len(self.env.ds[t].tasks)):
-                        best_res[i][j] = self.res_pq[best_i][i][j]
+                for j in range(len(self.env.ds[t].tasks)):
+                    best_assignment[j] = self.res_pq[best_i][t][j]
                 best_value[0] = self.function1_values[best_i]
                 best_value[1] = self.function2_values[best_i]
                 best_value[2] = self.function3_values[best_i]
                 best_gen = index
             _ = best_gen
             if best_value[2] < 0:
-                t += 1
                 failure_dnn += 1
+                next_dnn_index += 1
+                self.env.advance_time_slot()
                 continue
-            self.env.release_resource(self.env.ds[t], best_res[t])
-            t_res += _java_div(1, best_value[2])
+            # 接纳成功后先把 DNN 放入运行集合，
+            # 下一个时隙再统一更新负载、热度和动态可靠性。
+            _, _, _, delay = self._evaluate_assignment(t, best_assignment)
+            self._register_running_dnn(t, best_assignment, delay)
+            t_res += delay
             r_res += best_value[1]
             a_res += best_value[0]
-            t += 1
-        denominator = self.env.t_max - failure_dnn
+            success_dnn += 1
+            next_dnn_index += 1
+            self.env.advance_time_slot()
+        self._advance_until_drained()
+        denominator = success_dnn
         return ExperimentMetrics(
             avg_delay=t_res / denominator if denominator else 0.0,
             avg_operation=r_res / denominator if denominator else 0.0,
@@ -467,6 +511,7 @@ class AllDNNRefactor:
         )
 
     def max_resource_placement1(self, r: List[int], dnn: DNN, i: int, node_list: List[Node]) -> bool:
+        """在不优先云节点时递归寻找高资源部署。"""
         if (time.monotonic() - self.start_time) * 1000 > 10000:
             return False
         if i == len(dnn.tasks):
@@ -488,6 +533,7 @@ class AllDNNRefactor:
         return False
 
     def max_resource_placement(self, r: List[int], dnn: DNN, i: int, node_list: List[Node]) -> bool:
+        """按剩余 CPU 从高到低递归构造部署。"""
         if (time.monotonic() - self.start_time) * 1000 > 10000:
             return False
         if i == len(dnn.tasks):
@@ -509,6 +555,7 @@ class AllDNNRefactor:
         return False
 
     def _location_band(self, current_node: Node, candidate_node: Node) -> int:
+        """返回当前节点到候选节点的带宽近似值。"""
         band = 0
         if candidate_node is current_node:
             band = 10000
@@ -520,6 +567,7 @@ class AllDNNRefactor:
         return band
 
     def location_placement1(self, r: List[int], dnn: DNN, i: int, node_list: List[Node], node: Node) -> bool:
+        """在限制更强的局部候选集上递归寻找就近部署。"""
         if (time.monotonic() - self.start_time) * 1000 > 10000:
             return False
         if i == len(dnn.tasks):
@@ -546,6 +594,7 @@ class AllDNNRefactor:
         return False
 
     def location_placement(self, r: List[int], dnn: DNN, i: int, node_list: List[Node], node: Node) -> bool:
+        """按链路带宽优先的策略递归构造部署。"""
         if (time.monotonic() - self.start_time) * 1000 > 20000:
             return False
         if i == len(dnn.tasks):
@@ -571,20 +620,25 @@ class AllDNNRefactor:
         return False
 
     def count_delay_random1(self, dnn: DNN, x: List[List[int]], index1: int) -> float:
+        """转调环境中的局部时延估计函数。"""
         return self.env.count_delay_random1(dnn, x, index1)
 
     def run_random(self, reset_snapshot: List[Node]) -> ExperimentMetrics:
+        """运行随机部署基线。"""
         run_time = time.monotonic()
         t_res = 0.0
         r_res = 0.0
         a_res = 0.0
         failure_dnn = 0
+        success_dnn = 0
         self.env.reset_nodes(reset_snapshot)
-        t = 0
-        while t < self.env.t_max:
-            suiji = [[[0 for _ in range(self.max_dnn_num)] for _ in range(len(self.env.ds))] for _ in range(1)]
-            for value_idx in range(self.max_dnn_num):
-                suiji[0][t][value_idx] = -1
+        next_dnn_index = 0
+        while next_dnn_index < self.env.t_max or self.env.running_dnns:
+            if next_dnn_index >= self.env.t_max:
+                self.env.advance_time_slot()
+                continue
+            t = next_dnn_index
+            assignment = [-1 for _ in range(self.max_dnn_num)]
             started = time.monotonic()
             o = 0
             while True:
@@ -596,8 +650,6 @@ class AllDNNRefactor:
                 while p < len(self.env.ds[t].tasks):
                     n = int(random.random() * len(self.env.nodes))
                     xs[p][n] = 1
-                    if suiji[0][t][p] != -1:
-                        xs[p][suiji[0][t][p]] = 1
                     if self.env.check_resource(self.env.ds[t], xs) and (self.env.nodes[n].level != 1 or n == self.env.ds[t].initiateNode):
                         p += 1
                     else:
@@ -606,38 +658,48 @@ class AllDNNRefactor:
                     for p in range(len(self.env.ds[t].tasks)):
                         for n in range(len(self.env.nodes)):
                             if xs[p][n] == 1:
-                                suiji[0][t][p] = n
+                                assignment[p] = n
                     break
             if o == 1:
-                t += 1
                 failure_dnn += 1
+                next_dnn_index += 1
+                self.env.advance_time_slot()
                 continue
-            f1 = self.env.count_values1_random(t, 0, suiji)
-            f2 = self.env.count_values2_random(t, 0, suiji)
-            f3 = self.env.count_values3_random(t, 0, suiji)
-            self.env.release_resource(self.env.ds[t], suiji[0][t])
-            t_res += _java_div(1, f3)
+            # 随机基线保留原来的随机放置逻辑，
+            # 只把评价方式和执行语义切换到新的动态环境模型。
+            f1, f2, f3, delay = self._evaluate_assignment(t, assignment)
+            self._register_running_dnn(t, assignment, delay)
+            t_res += delay
             r_res += f2
             a_res += f1
-            t += 1
+            success_dnn += 1
+            next_dnn_index += 1
+            self.env.advance_time_slot()
+        self._advance_until_drained()
         return ExperimentMetrics(
-            avg_delay=t_res / self.env.t_max if self.env.t_max else 0.0,
-            avg_operation=r_res / self.env.t_max if self.env.t_max else 0.0,
-            avg_accuracy=a_res / self.env.t_max if self.env.t_max else 0.0,
+            avg_delay=t_res / success_dnn if success_dnn else 0.0,
+            avg_operation=r_res / success_dnn if success_dnn else 0.0,
+            avg_accuracy=a_res / success_dnn if success_dnn else 0.0,
             failure_count=failure_dnn,
             runtime_ms=int((time.monotonic() - run_time) * 1000),
         )
 
     def run_max_resource(self, reset_snapshot: List[Node]) -> ExperimentMetrics:
+        """运行按剩余资源优先的基线算法。"""
         run_time = time.monotonic()
         t_res = 0.0
         r_res = 0.0
         a_res = 0.0
         failure_dnn = 0
+        success_dnn = 0
         self.env.reset_nodes(reset_snapshot)
-        node_list = self.env.clone_nodes()
-        t = 0
-        while t < self.env.t_max:
+        next_dnn_index = 0
+        while next_dnn_index < self.env.t_max or self.env.running_dnns:
+            if next_dnn_index >= self.env.t_max:
+                self.env.advance_time_slot()
+                continue
+            t = next_dnn_index
+            node_list = self.env.clone_nodes()
             r = [0 for _ in range(len(self.env.ds[t].tasks))]
             self.start_time = time.monotonic()
             if self.max_resource_placement(r, self.env.ds[t], 0, node_list):
@@ -646,20 +708,20 @@ class AllDNNRefactor:
                 self.start_time = time.monotonic()
                 if not self.max_resource_placement1(r, self.env.ds[t], 0, node_list):
                     failure_dnn += 1
-                    t += 1
+                    next_dnn_index += 1
+                    self.env.advance_time_slot()
                     continue
-            suiji = [[[0 for _ in range(len(r))] for _ in range(len(self.env.ds))] for _ in range(1)]
-            for idx, value in enumerate(r):
-                suiji[0][t][idx] = value
-            f1 = self.env.count_values1_random(t, 0, suiji)
-            f2 = self.env.count_values2_random(t, 0, suiji)
-            f3 = self.env.count_values3_random(t, 0, suiji)
-            self.env.release_resource(self.env.ds[t], suiji[0][t])
-            t_res += _java_div(1, f3)
+            f1, f2, f3, delay = self._evaluate_assignment(t, r)
+            _ = f3
+            self._register_running_dnn(t, r, delay)
+            t_res += delay
             r_res += f2
             a_res += f1
-            t += 1
-        denominator = self.env.t_max - failure_dnn
+            success_dnn += 1
+            next_dnn_index += 1
+            self.env.advance_time_slot()
+        self._advance_until_drained()
+        denominator = success_dnn
         return ExperimentMetrics(
             avg_delay=t_res / denominator if denominator else 0.0,
             avg_operation=r_res / denominator if denominator else 0.0,
@@ -669,14 +731,20 @@ class AllDNNRefactor:
         )
 
     def run_local_first(self, reset_snapshot: List[Node]) -> ExperimentMetrics:
+        """运行按本地链路优先的基线算法。"""
         run_time = time.monotonic()
         t_res = 0.0
         r_res = 0.0
         a_res = 0.0
         failure_dnn = 0
+        success_dnn = 0
         self.env.reset_nodes(reset_snapshot)
-        t = 0
-        while t < self.env.t_max:
+        next_dnn_index = 0
+        while next_dnn_index < self.env.t_max or self.env.running_dnns:
+            if next_dnn_index >= self.env.t_max:
+                self.env.advance_time_slot()
+                continue
+            t = next_dnn_index
             r = [0 for _ in range(len(self.env.ds[t].tasks))]
             self.start_time = time.monotonic()
             if self.location_placement(r, self.env.ds[t], 0, self.env.nodes, self.env.nodes[self.env.ds[t].initiateNode]):
@@ -685,20 +753,20 @@ class AllDNNRefactor:
                 self.start_time = time.monotonic()
                 if not self.location_placement1(r, self.env.ds[t], 0, self.env.nodes, self.env.nodes[self.env.ds[t].initiateNode]):
                     failure_dnn += 1
-                    t += 1
+                    next_dnn_index += 1
+                    self.env.advance_time_slot()
                     continue
-            suiji = [[[0 for _ in range(len(r))] for _ in range(len(self.env.ds))] for _ in range(1)]
-            for idx, value in enumerate(r):
-                suiji[0][t][idx] = value
-            f1 = self.env.count_values1_random(t, 0, suiji)
-            f2 = self.env.count_values2_random(t, 0, suiji)
-            f3 = self.env.count_values3_random(t, 0, suiji)
-            self.env.release_resource(self.env.ds[t], suiji[0][t])
-            t_res += _java_div(1, f3)
+            f1, f2, f3, delay = self._evaluate_assignment(t, r)
+            _ = f3
+            self._register_running_dnn(t, r, delay)
+            t_res += delay
             r_res += f2
             a_res += f1
-            t += 1
-        denominator = self.env.t_max - failure_dnn
+            success_dnn += 1
+            next_dnn_index += 1
+            self.env.advance_time_slot()
+        self._advance_until_drained()
+        denominator = success_dnn
         return ExperimentMetrics(
             avg_delay=t_res / denominator if denominator else 0.0,
             avg_operation=r_res / denominator if denominator else 0.0,

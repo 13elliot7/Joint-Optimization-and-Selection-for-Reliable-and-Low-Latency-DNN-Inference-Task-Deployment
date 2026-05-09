@@ -5,12 +5,14 @@ from typing import Iterable, List, Set
 
 class SOTASelector:
     def __init__(self, m: int, lambda_a: float, lambda_r: float, v: float) -> None:
+        """初始化 RTBL 中的单步候选节点选择器。"""
         self.m = m
         self.lambda_a = lambda_a
         self.lambda_r = lambda_r
         self.v = v
 
     def compute_f1(self, selected: Set[int], a_j: List[float], rj_tilde: List[float]) -> float:
+        """计算已选节点集合的精度与可靠性联合收益。"""
         if not selected:
             return 0.0
         acc = 0.0
@@ -22,12 +24,14 @@ class SOTASelector:
         return self.v * (acc + self.lambda_r * reliability)
 
     def compute_f2(self, selected: Iterable[int], q: float, d_j: List[float]) -> float:
+        """计算已选节点集合带来的时延代价。"""
         result = 0.0
         for j in selected:
             result += q * d_j[j]
         return result
 
     def select(self, a_j: List[float], rj_tilde: List[float], q: float, d_j: List[float], d_max: float, remaining: Set[int]) -> List[int]:
+        """从候选节点中选择一组满足收益条件的部署位置。"""
         selected: Set[int] = set()
         if not remaining:
             return [0 for _ in range(self.m)]
@@ -60,6 +64,7 @@ class SOTASelector:
         return [1 if j in selected else 0 for j in range(self.m)]
 
     def select_multiple(self, a_j: List[float], rj_tilde: List[float], q: float, d_j: List[float], d_max: float) -> List[List[int]]:
+        """连续生成多组互不重复的候选选择结果。"""
         remaining = set(range(self.m))
         xij_t = [[0 for _ in range(self.m)] for _ in range(10)]
         for i in range(10):
@@ -68,4 +73,3 @@ class SOTASelector:
                 if xij_t[i][j] == 1:
                     remaining.discard(j)
         return xij_t
-

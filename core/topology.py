@@ -8,6 +8,7 @@ from models import DNN, LinkDNN, LinkNode, Node, Task
 
 
 def create_dnns(num: int, nodes: List[Node]) -> List[DNN]:
+    """批量生成随机 DNN 请求。"""
     ds: List[DNN] = []
     dag_generator = DAGGenerator()
     for _ in range(num):
@@ -18,6 +19,7 @@ def create_dnns(num: int, nodes: List[Node]) -> List[DNN]:
 
 
 def create_dnn(task_count: int, nodes: List[Node], dag_generator: DAGGenerator) -> DNN:
+    """构造一个包含随机任务、依赖和约束的 DNN。"""
     graph = dag_generator.get_graph(task_count)
     tasks: List[Task] = []
     link_dnns: List[LinkDNN] = []
@@ -49,6 +51,7 @@ def create_dnn(task_count: int, nodes: List[Node], dag_generator: DAGGenerator) 
 
 
 def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
+    """生成云边端节点集合以及双向链路拓扑。"""
     nodes: List[Node] = []
     link_nodes: List[LinkNode] = []
     cloud_node = Node(2**31 - 1, 2**31 - 1, 3, 0.99, 0.99, 28)
@@ -143,6 +146,7 @@ def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
     )
 
     def add_bidirectional_link(a: Node, b: Node, default_band: int, sampled_min: int, sampled_span: int) -> None:
+        """为两个节点补充一对带宽一致的双向链路。"""
         link_ab = LinkNode(a, b, default_band)
         link_ab.band_width = int(random.random() * sampled_span + sampled_min)
         link_nodes.append(link_ab)

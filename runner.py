@@ -8,6 +8,7 @@ from rtbl.scheduler import RTBLRunner
 
 
 def print_metrics(name: str, metrics) -> None:
+    """按统一格式打印实验指标。"""
     print(name)
     print(f"  avg_delay={metrics.avg_delay}")
     print(f"  avg_operation={metrics.avg_operation}")
@@ -17,6 +18,7 @@ def print_metrics(name: str, metrics) -> None:
 
 
 def main() -> None:
+    """解析命令行参数并运行指定算法。"""
     parser = argparse.ArgumentParser(description="Python refactor for src_backup_origin")
     parser.add_argument(
         "--algorithm",
@@ -49,6 +51,7 @@ def main() -> None:
     if args.algorithm == "localfirst":
         print_metrics("LOCALFIRST", refactor.run_local_first(initial_nodes))
         return
+
 
     print_metrics("PROPOSED", refactor.run_proposed())
     env.reset_nodes(initial_nodes)
