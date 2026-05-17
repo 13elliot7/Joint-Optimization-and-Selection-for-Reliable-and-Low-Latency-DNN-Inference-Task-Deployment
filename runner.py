@@ -8,13 +8,10 @@ from rtbl.scheduler import RTBLRunner
 
 
 def print_metrics(name: str, metrics) -> None:
-    """按统一格式打印实验指标。"""
+    """按动态模型口径打印实验指标。"""
     print(name)
-    print(f"  avg_delay={metrics.avg_delay}")
-    print(f"  avg_operation={metrics.avg_operation}")
-    print(f"  avg_accuracy={metrics.avg_accuracy}")
-    print(f"  failure_count={metrics.failure_count}")
-    print(f"  runtime_ms={metrics.runtime_ms}")
+    for key, value in metrics.to_report_rows():
+        print(f"  {key}={value}")
 
 
 def main() -> None:

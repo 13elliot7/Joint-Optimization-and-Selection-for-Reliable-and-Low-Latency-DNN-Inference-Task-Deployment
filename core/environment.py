@@ -49,7 +49,9 @@ class Environment:
         self.remaining_time = [self._sample_uptime() for _ in range(self.availability_node_count)]
         self.running_dnns: List[RunningDNN] = []
         self.current_slot = 0
+        self.finished_total = 0
         self._initialize_dynamic_state()
+        self._print_initialization_summary()
 
     def reset_nodes(self, snapshot: List[Node]) -> None:
         """用快照恢复节点状态并清空动态运行上下文。"""
@@ -66,6 +68,7 @@ class Environment:
             self.nodes[idx].heat = node.heat
         self.running_dnns = []
         self.current_slot = 0
+        self.finished_total = 0
         self._reset_link_state()
 
     def clone_nodes(self) -> List[Node]:
@@ -111,6 +114,46 @@ class Environment:
             node.o_reliability = node.base_o_reliability
             node.a_reliability = node.base_a_reliability
         self._reset_link_state()
+
+    def _print_initialization_summary(self) -> None:
+        """打印环境初始化摘要。"""
+        cloud_count = sum(1 for node in self.nodes if node.level == 3)
+        edge_count = sum(1 for node in self.nodes if node.level == 2)
+        user_count = sum(1 for node in self.nodes if node.level == 1)
+        print(
+            "[INIT] "
+            f"t_max={self.t_max} "
+            f"nodes={len(self.nodes)}(cloud={cloud_count} edge={edge_count} user={user_count}) "
+            f"links={len(self.link_nodes)} dnns={len(self.ds)}"
+        )
+        # if self.ds:
+        #     first_dnn = self.ds[0]
+        #     print(
+        #         "[INIT] "
+        #         f"first_dnn tasks={len(first_dnn.tasks)} "
+        #         f"deadline={first_dnn.delay} "
+        #         f"initiate={first_dnn.initiateNode}"
+        #     )
+        print(
+            "[INIT] "
+            f"slot_length={self.slot_length} "
+            f"alpha_r={self.alpha_r} beta_r={self.beta_r} "
+            f"alpha_l={self.alpha_l} beta_l={self.beta_l}"
+        )
+
+    def print_pending_dnn_info(self, dnn_index: int) -> None:
+        """打印当前待接纳 DNN 的基础信息。"""
+        dnn = self.ds[dnn_index]
+        print(
+            "[PENDING] "
+            f"slot={self.current_slot} "
+            f"dnn={dnn_index} "
+            f"tasks={len(dnn.tasks)} "
+            f"deadline={dnn.delay} "
+            f"initiate={dnn.initiateNode} "
+            f"preA={dnn.preA:.3f} "
+            f"preR={dnn.preR:.3f}"
+        )
 
     def _reset_link_state(self) -> None:
         """重置链路的先验可靠性和动态状态。"""
@@ -225,20 +268,33 @@ class Environment:
             used_links=self.collect_used_links(dnn_index, assignment),
         )
         self.running_dnns.append(running_dnn)
+        # 接纳成功后立即把新 DNN 纳入当前占用，
+        # 但热度和动态可靠性仍然只在时隙推进时更新。
+        self.allocate_running_resources()
+        print(
+            "[ACCEPTED] "
+            f"slot={self.current_slot} "
+            f"dnn={dnn_index} "
+            f"estimated_runtime={estimated_runtime:.2f} "
+            f"required_slots={remaining_slots}"
+        )
         return running_dnn
 
     def advance_time_slot(self) -> None:
         """推进一个离散时隙并刷新系统动态状态。"""
-        # 一个时隙推进完整执行一次系统状态转移：
-        # 清理已完成 DNN、推进运行中 DNN、再统一重算负载、热度和可靠性。
-        self.release_finished_dnns()
-        for running_dnn in self.running_dnns:
-            if running_dnn.remaining_slots > 0:
-                running_dnn.remaining_slots -= 1
+        # 一个时隙内先按当前占用累计热度和可靠性，
+        # 再结算运行时长并释放本时隙结束时已完成的 DNN。
+        slot_id = self.current_slot
         self.allocate_running_resources()
         self.update_node_heat()
         self.update_link_heat()
         self.refresh_dynamic_reliability()
+        for running_dnn in self.running_dnns:
+            if running_dnn.remaining_slots > 0:
+                running_dnn.remaining_slots -= 1
+        finished_count = sum(1 for running_dnn in self.running_dnns if running_dnn.remaining_slots <= 0)
+        self.release_finished_dnns()
+        self._print_slot_summary(slot_id, finished_count)
         self.current_slot += 1
 
     def release_finished_dnns(self) -> None:
@@ -247,6 +303,7 @@ class Environment:
         for running_dnn in self.running_dnns:
             if running_dnn.remaining_slots <= 0:
                 self.free_running_resources(running_dnn)
+                self.finished_total += 1
                 continue
             active.append(running_dnn)
         self.running_dnns = active
@@ -317,6 +374,34 @@ class Environment:
             base_reliability = link.base_reliability if link.base_reliability is not None else 1.0
             next_reliability = base_reliability * math.exp(-self.alpha_l * link.load_ratio - self.beta_l * link.heat)
             link.reliability = min(base_reliability, max(self.l_min, next_reliability))
+
+    def _print_slot_summary(self, slot_id: int, finished_count: int) -> None:
+        """打印单个时隙的运行摘要。"""
+        node_loads = [node.load_ratio for node in self.nodes]
+        link_loads = [link.load_ratio for link in self.link_nodes]
+        node_reliabilities = [node.o_reliability for node in self.nodes]
+        link_reliabilities = [
+            link.reliability if link.reliability is not None else link.base_reliability or 1.0
+            for link in self.link_nodes
+        ]
+        node_load_avg = sum(node_loads) / len(node_loads) if node_loads else 0.0
+        node_load_max = max(node_loads) if node_loads else 0.0
+        link_load_avg = sum(link_loads) / len(link_loads) if link_loads else 0.0
+        link_load_max = max(link_loads) if link_loads else 0.0
+        node_r_avg = sum(node_reliabilities) / len(node_reliabilities) if node_reliabilities else 0.0
+        link_r_avg = sum(link_reliabilities) / len(link_reliabilities) if link_reliabilities else 0.0
+        print(
+            f"[SLOT {slot_id}] "
+            f"running={len(self.running_dnns)} "
+            f"finished={finished_count} "
+            f"finished_total={self.finished_total} "
+            f"node_load_avg={node_load_avg:.2f} "
+            f"node_load_max={node_load_max:.2f} "
+            f"link_load_avg={link_load_avg:.2f} "
+            f"link_load_max={link_load_max:.2f} "
+            f"node_r_avg={node_r_avg:.2f} "
+            f"link_r_avg={link_r_avg:.2f}\n"
+        )
 
     def count_dynamic_link_reliability_by_assignment(self, dnn_index: int, assignment: List[int]) -> float:
         """计算部署方案经过链路的联合可靠性。"""

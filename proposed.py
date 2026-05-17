@@ -144,6 +144,7 @@ class AllDNNRefactor:
         for x in range(len(self.res[n][i])):
             self.res_pq[next_index][i][x] = self.res[n][i][x]
 
+
     def cross_over(self, i: int, m: int, n: int, next_index: int) -> None:
         """执行按单点交换的交叉操作。"""
         dnn = self.env.ds[i]
@@ -326,6 +327,8 @@ class AllDNNRefactor:
         success_dnn = 0
         run_time = time.monotonic()
         next_dnn_index = 0
+        # 外层循环按 DNN 到达顺序驱动系统运行；
+        # 当没有新 DNN 时，只继续推进运行中的任务。
         while next_dnn_index < self.env.t_max or self.env.running_dnns:
             # 当所有 DNN 都已到达后，只需要继续推进系统，
             # 直到已接纳的运行中 DNN 全部执行完成。
@@ -333,6 +336,8 @@ class AllDNNRefactor:
                 self.env.advance_time_slot()
                 continue
             t = next_dnn_index
+            self.env.print_pending_dnn_info(t)
+            # 为当前 DNN 重置本轮搜索状态，并记录当前已知最优解。
             best_value = [0.0, 0.0, -1.0]
             best_assignment = [0 for _ in range(self.max_dnn_num)]
             self.res = self._new_population(self.pop_size)
@@ -346,11 +351,14 @@ class AllDNNRefactor:
             o = 0
             index = 0
             best_gen = 0
+            # 内层循环是当前 DNN 的进化搜索过程。
             while index <= self.iteration_limit:
                 if o == 1:
                     break
                 self.pareto_level_sort = [[0 for _ in range(2 * self.pop_size)] for _ in range(len(self.env.ds))]
                 if index == 0:
+                    # 首代种群由三部分组成：
+                    # 一个全云解、若干随机可行解、以及两个额外满足时延约束的补充解。
                     cloud_index = 0
                     for i in range(len(self.env.nodes)):
                         if self.env.nodes[i].level == 3:
@@ -414,6 +422,7 @@ class AllDNNRefactor:
                             break
                     if o == 1:
                         continue
+                # 把父代复制到 P+Q，再通过交叉和变异生成新的候选个体。
                 self.res_pq = self._new_population(2 * self.pop_size)
                 for m in range(len(self.res)):
                     for m1 in range(len(self.res[m])):
@@ -423,6 +432,7 @@ class AllDNNRefactor:
                     a1 = int(random.random() * self.pop_size)
                     b1 = int(random.random() * self.pop_size)
                     self.cross_over1(t, a1, b1, m + self.pop_size)
+                # 对联合种群逐个计算三目标值，并挑出本代最优候选。
                 for m in range(len(self.res_pq)):
                     self.count_values1(t, m)
                     self.count_values2(t, m)
@@ -448,6 +458,7 @@ class AllDNNRefactor:
                     best_value[1] = self.function2_values[bi]
                     best_value[2] = self.function3_values[bi]
                     best_gen = index
+                # 使用非支配排序和拥挤距离从 P+Q 中筛出下一代父代。
                 self.dominated_sort(t)
                 self.get_res(t, self.res_pq, self.function1_values, self.function2_values, self.function3_values)
                 self.update_res(self.res_pq, self.pareto_level_sort, self.distance, t)
@@ -457,6 +468,8 @@ class AllDNNRefactor:
                 next_dnn_index += 1
                 self.env.advance_time_slot()
                 continue
+            # 进化结束后，再对保留下来的父代种群做一次最终选择，
+            # 防止历史 best 被后续更新漏掉。
             self.res_pq = self._new_population(self.pop_size)
             self.res_pq = self.res
             for m in range(len(self.res_pq)):
@@ -485,6 +498,7 @@ class AllDNNRefactor:
                 best_value[2] = self.function3_values[best_i]
                 best_gen = index
             _ = best_gen
+            # 若当前最优解仍不满足时延收益条件，则本次接纳失败。
             if best_value[2] < 0:
                 failure_dnn += 1
                 next_dnn_index += 1
@@ -638,6 +652,7 @@ class AllDNNRefactor:
                 self.env.advance_time_slot()
                 continue
             t = next_dnn_index
+            self.env.print_pending_dnn_info(t)
             assignment = [-1 for _ in range(self.max_dnn_num)]
             started = time.monotonic()
             o = 0
@@ -699,6 +714,7 @@ class AllDNNRefactor:
                 self.env.advance_time_slot()
                 continue
             t = next_dnn_index
+            self.env.print_pending_dnn_info(t)
             node_list = self.env.clone_nodes()
             r = [0 for _ in range(len(self.env.ds[t].tasks))]
             self.start_time = time.monotonic()
@@ -745,6 +761,7 @@ class AllDNNRefactor:
                 self.env.advance_time_slot()
                 continue
             t = next_dnn_index
+            self.env.print_pending_dnn_info(t)
             r = [0 for _ in range(len(self.env.ds[t].tasks))]
             self.start_time = time.monotonic()
             if self.location_placement(r, self.env.ds[t], 0, self.env.nodes, self.env.nodes[self.env.ds[t].initiateNode]):
