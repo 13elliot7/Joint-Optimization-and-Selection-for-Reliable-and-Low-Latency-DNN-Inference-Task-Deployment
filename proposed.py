@@ -95,6 +95,52 @@ class AllDNNRefactor:
         while self.env.running_dnns:
             self.env.advance_time_slot()
 
+    def _log_proposed_stage(self, dnn_index: int, phase: str, **kwargs: object) -> None:
+        """打印 proposed 算法的阶段性日志。"""
+        details = " ".join(f"{key}={value}" for key, value in kwargs.items())
+        if details:
+            print(f"\t[PROPOSED] dnn={dnn_index} phase={phase} {details}")
+        else:
+            print(f"\t[PROPOSED] dnn={dnn_index} phase={phase}")
+
+    def _is_assignment_valid(self, dnn_index: int, assignment: List[int]) -> bool:
+        """检查一维部署向量是否满足资源和节点层级约束。"""
+        dnn = self.env.ds[dnn_index]
+        task_count = len(dnn.tasks)
+        xs = self._build_assignment_matrix(dnn_index, assignment[:task_count])
+        if not self.env.check_resource(dnn, xs):
+            return False
+        for task_idx in range(task_count):
+            node_idx = assignment[task_idx]
+            if self.env.nodes[node_idx].level == 1 and node_idx != dnn.initiateNode:
+                return False
+        return True
+
+    def _mutate_assignment(self, dnn_index: int, assignment: List[int]) -> List[int]:
+        """对临时子代执行一次独立变异并返回结果。"""
+        mutated = list(assignment)
+        if random.random() >= self.mutate_pm:
+            return mutated
+        dnn = self.env.ds[dnn_index]
+        task_count = len(dnn.tasks)
+        attempts = 0
+        while attempts < 200:
+            attempts += 1
+            task_idx = int(random.random() * task_count)
+            node_idx = int(random.random() * len(self.env.nodes))
+            original = mutated[task_idx]
+            mutated[task_idx] = node_idx
+            if self._is_assignment_valid(dnn_index, mutated):
+                return mutated
+            mutated[task_idx] = original
+        return list(assignment)
+
+    def _write_child(self, dnn_index: int, child: List[int], target_index: int) -> None:
+        """把子代写入联合种群指定槽位。"""
+        task_count = len(self.env.ds[dnn_index].tasks)
+        for x in range(task_count):
+            self.res_pq[target_index][dnn_index][x] = child[x]
+
     def mutate(self, i: int, m: int) -> None:
         """对指定个体执行一次随机变异。"""
         rate = random.random()
@@ -113,75 +159,65 @@ class AllDNNRefactor:
                 xs[x][y] = 0
 
     def cross_over1(self, i: int, m: int, n: int, next_index: int) -> None:
-        """执行按后缀交换的交叉操作。"""
+        """执行按后缀交换的交叉操作，并生成两个独立子代。"""
         dnn = self.env.ds[i]
-        d_m = len(dnn.tasks)
+        task_count = len(dnn.tasks)
+        parent_m = list(self.res[m][i])
+        parent_n = list(self.res[n][i])
+        child_m = list(parent_m)
+        child_n = list(parent_n)
+        success = False
         self.start_time = time.monotonic()
         while True:
             if (time.monotonic() - self.start_time) * 1000 > 10000:
                 break
-            xm = self._build_assignment_matrix(i, self.res[m][i])
-            xn = self._build_assignment_matrix(i, self.res[n][i])
-            index_m = int(d_m * random.random())
-            index_n = index_m
-            for j in range(index_m, d_m):
-                xm[j][self.res[m][i][j]] = 0
-                xm[j][self.res[n][i][j]] = 1
-                xn[j][self.res[n][i][j]] = 0
-                xn[j][self.res[m][i][j]] = 1
-            if index_n == -1:
-                continue
-            if self.env.check_resource(dnn, xn) and self.env.check_resource(dnn, xm):
-                for j in range(index_m, d_m):
-                    temp = self.res[n][i][j]
-                    self.res[n][i][j] = self.res[m][i][j]
-                    self.res[m][i][j] = temp
+            index_m = int(task_count * random.random())
+            child_m = list(parent_m)
+            child_n = list(parent_n)
+            for j in range(index_m, task_count):
+                child_m[j] = parent_n[j]
+                child_n[j] = parent_m[j]
+            if self._is_assignment_valid(i, child_m) and self._is_assignment_valid(i, child_n):
+                success = True
                 break
-        self.mutate(i, m)
-        for x in range(len(self.res[m][i])):
-            self.res_pq[next_index][i][x] = self.res[m][i][x]
-        self.mutate(i, n)
-        for x in range(len(self.res[n][i])):
-            self.res_pq[next_index][i][x] = self.res[n][i][x]
+        if not success:
+            child_m = list(parent_m)
+            child_n = list(parent_n)
+        child_m = self._mutate_assignment(i, child_m)
+        child_n = self._mutate_assignment(i, child_n)
+        self._write_child(i, child_m, next_index)
+        self._write_child(i, child_n, next_index + 1)
 
 
     def cross_over(self, i: int, m: int, n: int, next_index: int) -> None:
-        """执行按单点交换的交叉操作。"""
+        """执行按单点交换的交叉操作，并生成两个独立子代。"""
         dnn = self.env.ds[i]
-        d_m = len(dnn.tasks)
-        d_n = len(dnn.tasks)
-        xm = self._build_assignment_matrix(i, self.res[m][i])
-        xn = self._build_assignment_matrix(i, self.res[n][i])
+        task_count = len(dnn.tasks)
+        parent_m = list(self.res[m][i])
+        parent_n = list(self.res[n][i])
+        child_m = list(parent_m)
+        child_n = list(parent_n)
+        success = False
         self.start_time = time.monotonic()
         while True:
             if (time.monotonic() - self.start_time) * 1000 > 10000:
                 break
-            index_m = int(d_m * random.random())
-            index_n = int(d_n * random.random())
-            xm[index_m][self.res[n][i][index_n]] = 1
-            xm[index_m][self.res[m][i][index_m]] = 0
-            xn[index_n][self.res[m][i][index_m]] = 1
-            xn[index_n][self.res[n][i][index_n]] = 0
-            if (
-                self.env.nodes[self.res[m][i][index_m]].level != 1
-                and self.env.nodes[self.res[n][i][index_n]].level != 1
-                and self.env.check_resource(dnn, xn)
-                and self.env.check_resource(dnn, xm)
-            ):
-                temp = self.res[n][i][index_n]
-                self.res[n][i][index_n] = self.res[m][i][index_m]
-                self.res[m][i][index_m] = temp
+            index_m = int(task_count * random.random())
+            index_n = int(task_count * random.random())
+            child_m = list(parent_m)
+            child_n = list(parent_n)
+            child_m[index_m] = parent_n[index_n]
+            child_n[index_n] = parent_m[index_m]
+            if self._is_assignment_valid(i, child_m) and self._is_assignment_valid(i, child_n):
+                success = True
                 break
-            xm[index_m][self.res[n][i][index_n]] = 0
-            xm[index_m][self.res[m][i][index_m]] = 1
-            xn[index_n][self.res[m][i][index_m]] = 0
-            xn[index_n][self.res[n][i][index_n]] = 1
-        self.mutate(i, m)
-        for x in range(len(self.res[m][i])):
-            self.res_pq[next_index][i][x] = self.res[m][i][x]
-        self.mutate(i, n)
-        for x in range(len(self.res[n][i])):
-            self.res_pq[next_index][i][x] = self.res[n][i][x]
+        if not success:
+            child_m = list(parent_m)
+            child_n = list(parent_n)
+        child_m = self._mutate_assignment(i, child_m)
+        child_n = self._mutate_assignment(i, child_n)
+        self._write_child(i, child_m, next_index)
+        self._write_child(i, child_n, next_index + 1)
 
     def count_values1(self, i: int, m: int) -> None:
         """计算第一个目标值并写回缓存。"""
@@ -194,6 +230,13 @@ class AllDNNRefactor:
     def count_values3(self, i: int, m: int) -> None:
         """计算第三个目标值并写回缓存。"""
         self.function3_values[m] = self._evaluate_assignment(i, self.res_pq[m][i])[2]
+
+    def count_values(self, i: int, m: int) -> None:
+        """一次性计算三个目标值并写回缓存。"""
+        value1, value2, value3, _ = self._evaluate_assignment(i, self.res_pq[m][i])
+        self.function1_values[m] = value1
+        self.function2_values[m] = value2
+        self.function3_values[m] = value3
 
     def dominated_sort(self, o: int) -> None:
         """对当前种群执行非支配排序。"""
@@ -233,40 +276,52 @@ class AllDNNRefactor:
             rank += 1
 
     def get_res(self, i: int, pq: List[List[List[int]]], values1: List[float], values2: List[float], values3: List[float]) -> List[List[int]]:
-        """按拥挤距离规则计算同层个体的距离值。"""
-        v1 = list(range(len(values1)))
-        v2 = list(range(len(values2)))
-        v3 = list(range(len(values3)))
-        for m in range(len(v1)):
-            for n in range(len(v1) - 1 - m):
-                if values1[n] > values1[n + 1]:
-                    values1[n], values1[n + 1] = values1[n + 1], values1[n]
-                    v1[n], v1[n + 1] = v1[n + 1], v1[n]
-        for m in range(len(v2)):
-            for n in range(len(v2) - 1 - m):
-                if values2[n] > values2[n + 1]:
-                    values2[n], values2[n + 1] = values2[n + 1], values2[n]
-                    v2[n], v2[n + 1] = v2[n + 1], v2[n]
-        for m in range(len(v3)):
-            for n in range(len(v3) - 1 - m):
-                if values3[n] > values3[n + 1]:
-                    values3[n], values3[n + 1] = values3[n + 1], values3[n]
-                    v3[n], v3[n + 1] = v3[n + 1], v3[n]
-        for m in range(len(pq)):
-            if v1[m] == 0 or v1[m] == len(values1) - 1:
-                self.distance[i][m] = 2**31 - 1
-            else:
-                self.distance[i][m] += _java_div(abs(values1[v1[m] + 1] - values1[v1[m] - 1]), values1[-1] - values1[0])
-        for m in range(len(pq)):
-            if v2[m] == 0 or v2[m] == len(values2) - 1:
-                self.distance[i][m] = 2**31 - 1
-            else:
-                self.distance[i][m] += _java_div(abs(values2[v2[m] + 1] - values2[v2[m] - 1]), values2[-1] - values2[0])
-        for m in range(len(pq)):
-            if v3[m] == 0 or v3[m] == len(values3) - 1:
-                self.distance[i][m] = 2**31 - 1
-            else:
-                self.distance[i][m] += _java_div(abs(values3[v3[m] + 1] - values3[v3[m] - 1]), values3[-1] - values3[0])
+        """按 Pareto 层分别计算联合种群的拥挤距离。"""
+        inf = 2**31 - 1
+        population_size = len(pq)
+
+        # 先清空当前 DNN 对应的一行距离，避免残留旧轮次结果。
+        for m in range(population_size):
+            self.distance[i][m] = 0
+
+        # 拥挤距离只在同一 Pareto 层内有意义，因此先按 rank 分组。
+        fronts: dict[int, List[int]] = {}
+        for m in range(population_size):
+            rank = self.pareto_level_sort[i][m]
+            fronts.setdefault(rank, []).append(m)
+
+        objectives = (values1, values2, values3)
+        for front in fronts.values():
+            if not front:
+                continue
+            if len(front) <= 2:
+                for idx in front:
+                    self.distance[i][idx] = inf
+                continue
+
+            for values in objectives:
+                sorted_front = sorted(front, key=lambda idx: values[idx])
+                left = sorted_front[0]
+                right = sorted_front[-1]
+                self.distance[i][left] = inf
+                self.distance[i][right] = inf
+
+                min_value = values[left]
+                max_value = values[right]
+                denominator = max_value - min_value
+                if denominator == 0:
+                    continue
+
+                for pos in range(1, len(sorted_front) - 1):
+                    curr = sorted_front[pos]
+                    if self.distance[i][curr] == inf:
+                        continue
+                    prev_idx = sorted_front[pos - 1]
+                    next_idx = sorted_front[pos + 1]
+                    self.distance[i][curr] += _java_div(
+                        abs(values[next_idx] - values[prev_idx]),
+                        denominator,
+                    )
         return self.distance
 
     def update_res(self, pq: List[List[List[int]]], rank: List[List[int]], dis: List[List[int]], i: int) -> None:
@@ -337,6 +392,13 @@ class AllDNNRefactor:
                 continue
             t = next_dnn_index
             self.env.print_pending_dnn_info(t)
+            self._log_proposed_stage(
+                t,
+                "search_start",
+                tasks=len(self.env.ds[t].tasks),
+                deadline=self.env.ds[t].delay,
+                iteration_limit=self.iteration_limit,
+            )
             # 为当前 DNN 重置本轮搜索状态，并记录当前已知最优解。
             best_value = [0.0, 0.0, -1.0]
             best_assignment = [0 for _ in range(self.max_dnn_num)]
@@ -351,12 +413,15 @@ class AllDNNRefactor:
             o = 0
             index = 0
             best_gen = 0
-            # 内层循环是当前 DNN 的进化搜索过程。
-            while index <= self.iteration_limit:
+            # 阶段一：进入当前 DNN 的进化搜索过程。
+            while index < self.iteration_limit:
                 if o == 1:
                     break
+                if index == 0 or index == self.iteration_limit or index % 10 == 0:
+                    self._log_proposed_stage(t, "generation_start", generation=index)
                 self.pareto_level_sort = [[0 for _ in range(2 * self.pop_size)] for _ in range(len(self.env.ds))]
                 if index == 0:
+                    self._log_proposed_stage(t, "initialize_population", population=self.pop_size)
                     # 首代种群由三部分组成：
                     # 一个全云解、若干随机可行解、以及两个额外满足时延约束的补充解。
                     cloud_index = 0
@@ -390,6 +455,7 @@ class AllDNNRefactor:
                         if o == 1:
                             break
                     if o == 1:
+                        self._log_proposed_stage(t, "initialize_population_timeout")
                         continue
                     self.start_time = time.monotonic()
                     for j in range(self.pop_size - 2, self.pop_size):
@@ -421,22 +487,23 @@ class AllDNNRefactor:
                         if o == 1:
                             break
                     if o == 1:
+                        self._log_proposed_stage(t, "deadline_seed_timeout")
                         continue
+                # 阶段二：基于父代构造 P+Q 联合种群。
                 # 把父代复制到 P+Q，再通过交叉和变异生成新的候选个体。
                 self.res_pq = self._new_population(2 * self.pop_size)
                 for m in range(len(self.res)):
                     for m1 in range(len(self.res[m])):
                         for m2 in range(len(self.res[m][m1])):
                             self.res_pq[m][m1][m2] = self.res[m][m1][m2]
-                for m in range(self.pop_size):
+                for m in range(0, self.pop_size, 2):
                     a1 = int(random.random() * self.pop_size)
                     b1 = int(random.random() * self.pop_size)
-                    self.cross_over1(t, a1, b1, m + self.pop_size)
+                    self.cross_over1(t, a1, b1, self.pop_size + m)
+                # 阶段三：评估联合种群并更新当前已知最优解。
                 # 对联合种群逐个计算三目标值，并挑出本代最优候选。
                 for m in range(len(self.res_pq)):
-                    self.count_values1(t, m)
-                    self.count_values2(t, m)
-                    self.count_values3(t, m)
+                    self.count_values(t, m)
                 bi = 0
                 for i in range(2 * self.pop_size):
                     if self.function3_values[i] > 0 and self.function3_values[bi] < 0:
@@ -458,24 +525,33 @@ class AllDNNRefactor:
                     best_value[1] = self.function2_values[bi]
                     best_value[2] = self.function3_values[bi]
                     best_gen = index
+                    self._log_proposed_stage(
+                        t,
+                        "generation_best_updated",
+                        generation=index,
+                        value1=f"{best_value[0]:.4f}",
+                        value2=f"{best_value[1]:.4f}",
+                        value3=f"{best_value[2]:.4f}",
+                    )
+                # 阶段四：通过非支配排序和拥挤距离更新下一代父代。
                 # 使用非支配排序和拥挤距离从 P+Q 中筛出下一代父代。
                 self.dominated_sort(t)
                 self.get_res(t, self.res_pq, self.function1_values, self.function2_values, self.function3_values)
                 self.update_res(self.res_pq, self.pareto_level_sort, self.distance, t)
                 index += 1
             if o == 1:
+                self._log_proposed_stage(t, "search_failed")
                 failure_dnn += 1
                 next_dnn_index += 1
                 self.env.advance_time_slot()
                 continue
+            # 阶段五：对保留下来的父代做最终选择。
             # 进化结束后，再对保留下来的父代种群做一次最终选择，
             # 防止历史 best 被后续更新漏掉。
             self.res_pq = self._new_population(self.pop_size)
             self.res_pq = self.res
             for m in range(len(self.res_pq)):
-                self.count_values1(t, m)
-                self.count_values2(t, m)
-                self.count_values3(t, m)
+                self.count_values(t, m)
             best_i = 0
             for i in range(self.pop_size):
                 if self.function3_values[i] > 0 and self.function3_values[best_i] < 0:
@@ -498,15 +574,31 @@ class AllDNNRefactor:
                 best_value[2] = self.function3_values[best_i]
                 best_gen = index
             _ = best_gen
+            self._log_proposed_stage(
+                t,
+                "final_selection",
+                best_generation=best_gen,
+                value1=f"{best_value[0]:.4f}",
+                value2=f"{best_value[1]:.4f}",
+                value3=f"{best_value[2]:.4f}",
+            )
             # 若当前最优解仍不满足时延收益条件，则本次接纳失败。
             if best_value[2] < 0:
+                self._log_proposed_stage(t, "rejected", reason="deadline_or_score")
                 failure_dnn += 1
                 next_dnn_index += 1
                 self.env.advance_time_slot()
                 continue
+            # 阶段六：接纳最优解并把 DNN 注册为运行块。
             # 接纳成功后先把 DNN 放入运行集合，
             # 下一个时隙再统一更新负载、热度和动态可靠性。
             _, _, _, delay = self._evaluate_assignment(t, best_assignment)
+            self._log_proposed_stage(
+                t,
+                "accepted",
+                delay=f"{delay:.2f}",
+                best_generation=best_gen,
+            )
             self._register_running_dnn(t, best_assignment, delay)
             t_res += delay
             r_res += best_value[1]
