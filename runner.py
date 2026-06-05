@@ -19,7 +19,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Python refactor for src_backup_origin")
     parser.add_argument(
         "--algorithm",
-        choices=["proposed", "random", "maxresource", "localfirst", "rtbl", "all"],
+        choices=["proposed", "customized", "random", "maxresource", "localfirst", "rtbl", "all"],
         default="all",
     )
     parser.add_argument("--tmax", type=int, default=40)
@@ -39,6 +39,9 @@ def main() -> None:
     if args.algorithm == "proposed":
         print_metrics("PROPOSED", refactor.run_proposed())
         return
+    if args.algorithm == "customized":
+        print_metrics("CUSTOMIZED", refactor.run_customized_proposed())
+        return
     if args.algorithm == "random":
         print_metrics("RANDOM", refactor.run_random(initial_nodes))
         return
@@ -51,6 +54,8 @@ def main() -> None:
 
 
     print_metrics("PROPOSED", refactor.run_proposed())
+    env.reset_nodes(initial_nodes)
+    print_metrics("CUSTOMIZED", refactor.run_customized_proposed())
     env.reset_nodes(initial_nodes)
     print_metrics("RANDOM", refactor.run_random(initial_nodes))
     env.reset_nodes(initial_nodes)

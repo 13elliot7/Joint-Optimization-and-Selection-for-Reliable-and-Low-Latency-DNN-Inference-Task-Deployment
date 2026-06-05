@@ -16,6 +16,7 @@ class Node:
     base_a_reliability: float | None = None
     load_ratio: float = 0.0
     heat: float = 0.0
+    comp_power: float = 1.0
 
     def __post_init__(self) -> None:
         """在节点创建后补齐动态可靠性建模所需的基线字段。"""
@@ -55,16 +56,17 @@ class Node:
     def clone(self) -> "Node":
         """复制节点对象及其动态状态。"""
         return Node(
-            self.cpu,
-            self.max_cpu,
-            self.level,
-            self.o_reliability,
-            self.a_reliability,
-            self.float_rate,
-            self.base_o_reliability,
-            self.base_a_reliability,
-            self.load_ratio,
-            self.heat,
+            cpu=self.cpu,
+            max_cpu=self.max_cpu,
+            level=self.level,
+            o_reliability=self.o_reliability,
+            a_reliability=self.a_reliability,
+            float_rate=self.float_rate,
+            base_o_reliability=self.base_o_reliability,
+            base_a_reliability=self.base_a_reliability,
+            load_ratio=self.load_ratio,
+            heat=self.heat,
+            comp_power=self.comp_power,
         )
 
 
@@ -92,6 +94,7 @@ class LinkNode:
     reliability: float | None = None
     load_ratio: float = 0.0
     heat: float = 0.0
+    energy_per_mb: float = 0.0
 
     def __post_init__(self) -> None:
         """在链路创建后补齐动态可靠性字段。"""

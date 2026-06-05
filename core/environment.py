@@ -66,6 +66,7 @@ class Environment:
             self.nodes[idx].base_a_reliability = node.base_a_reliability
             self.nodes[idx].load_ratio = node.load_ratio
             self.nodes[idx].heat = node.heat
+            self.nodes[idx].comp_power = node.comp_power
         self.running_dnns = []
         self.current_slot = 0
         self.finished_total = 0
@@ -211,7 +212,7 @@ class Environment:
         for link in links:
             weights[link] = weights.get(link, 0.0) + data_amount
 
-    def _collect_link_weights(self, dnn_index: int, assignment: List[int]) -> Dict[LinkNode, float]:
+    def _collect_link_weights(self, dnn_index: int, assignment: List[int], include_return: bool = True) -> Dict[LinkNode, float]:
         """收集一个 DNN 部署对各链路造成的总数据量。"""
         dnn = self.ds[dnn_index]
         weights: Dict[LinkNode, float] = {}
@@ -235,17 +236,47 @@ class Environment:
                 self.get_arrive_link(start_node, end_node),
                 dnn_link.float_tran,
             )
-        last_node = self.nodes[assignment[len(dnn.tasks) - 1]]
-        self._add_path_link_weights(
-            weights,
-            self.get_arrive_link(last_node, self.nodes[dnn.initiateNode]),
-            dnn.backFloat,
-        )
+        if include_return:
+            last_node = self.nodes[assignment[len(dnn.tasks) - 1]]
+            self._add_path_link_weights(
+                weights,
+                self.get_arrive_link(last_node, self.nodes[dnn.initiateNode]),
+                dnn.backFloat,
+            )
         return weights
 
     def collect_used_links(self, dnn_index: int, assignment: List[int]) -> List[LinkNode]:
         """提取部署方案实际经过的唯一链路集合。"""
         return list(self._collect_link_weights(dnn_index, assignment).keys())
+
+    def count_compute_energy_by_assignment(self, dnn_index: int, assignment: List[int]) -> float:
+        """统计部署方案在节点计算侧的总能耗。"""
+        dnn = self.ds[dnn_index]
+        total_energy = 0.0
+        for task_idx, node_idx in enumerate(assignment):
+            task = dnn.tasks[task_idx]
+            node = self.nodes[node_idx]
+            exec_time = task.float_num / node.float_rate if node.float_rate else 0.0
+            total_energy += node.comp_power * exec_time
+        return total_energy
+
+    def count_link_energy_by_assignment(self, dnn_index: int, assignment: List[int]) -> float:
+        """统计部署方案的链路传输能耗，不计最终结果回传。"""
+        total_energy = 0.0
+        for link, data_amount in self._collect_link_weights(dnn_index, assignment, include_return=False).items():
+            total_energy += link.energy_per_mb * data_amount
+        return total_energy
+
+    def count_total_energy_by_assignment(self, dnn_index: int, assignment: List[int]) -> float:
+        """统计部署方案的总能耗。"""
+        return self.count_compute_energy_by_assignment(dnn_index, assignment) + self.count_link_energy_by_assignment(
+            dnn_index, assignment
+        )
+
+    def count_energy_utility_by_assignment(self, dnn_index: int, assignment: List[int]) -> float:
+        """把总能耗转成越大越好的能耗收益。"""
+        total_energy = self.count_total_energy_by_assignment(dnn_index, assignment)
+        return 1.0 / total_energy if total_energy > 0 else 0.0
 
     def add_running_dnn(
         self,

@@ -147,6 +147,7 @@ class RTBLRunner:
             avg_delay=t_res / self.env.t_max if self.env.t_max else 0.0,
             avg_operation=r_res / self.env.t_max if self.env.t_max else 0.0,
             avg_accuracy=a_res / self.env.t_max if self.env.t_max else 0.0,
+            avg_energy=0.0,
             failure_count=failure_dnn,
             runtime_ms=int((__import__("time").monotonic() - run_time) * 1000),
         )

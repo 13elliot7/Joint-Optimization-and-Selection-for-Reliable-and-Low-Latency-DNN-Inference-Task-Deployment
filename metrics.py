@@ -11,6 +11,7 @@ class ExperimentMetrics:
     avg_delay: float
     avg_operation: float
     avg_accuracy: float
+    avg_energy: float
     failure_count: int
     runtime_ms: int
 
@@ -34,12 +35,18 @@ class ExperimentMetrics:
         """返回接纳失败或部署失败的任务数量。"""
         return self.failure_count
 
+    @property
+    def avg_total_energy(self) -> float:
+        """返回平均总能耗。"""
+        return self.avg_energy
+
     def to_report_rows(self) -> List[Tuple[str, float | int]]:
         """按动态模型语义生成统一输出项。"""
         return [
             ("avg_estimated_delay", self.avg_estimated_delay),
             ("avg_dynamic_operation_reliability", self.avg_dynamic_operation_reliability),
             ("avg_dynamic_accuracy_reliability", self.avg_dynamic_accuracy_reliability),
+            ("avg_total_energy", self.avg_total_energy),
             ("rejected_or_failed_count", self.rejected_or_failed_count),
             ("runtime_ms", self.runtime_ms),
         ]

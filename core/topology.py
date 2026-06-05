@@ -7,6 +7,29 @@ from core.dag_generator import DAGGenerator
 from models import DNN, LinkDNN, LinkNode, Node, Task
 
 
+def _default_comp_power(level: int) -> float:
+    """按节点层级返回固定计算功率。"""
+    if level == 3:
+        return 18.0
+    if level == 2:
+        return 10.0
+    return 4.0
+
+
+def _default_link_energy_per_mb(start_level: int, end_level: int) -> float:
+    """按链路层级组合返回固定单位传输能耗。"""
+    levels = {start_level, end_level}
+    if levels == {2, 3}:
+        return 0.12
+    if levels == {1, 2}:
+        return 0.05
+    if levels == {2}:
+        return 0.08
+    if levels == {1}:
+        return 0.03
+    return 0.10
+
+
 def create_dnns(num: int, nodes: List[Node]) -> List[DNN]:
     """批量生成随机 DNN 请求。"""
     ds: List[DNN] = []
@@ -55,6 +78,7 @@ def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
     nodes: List[Node] = []
     link_nodes: List[LinkNode] = []
     cloud_node = Node(2**31 - 1, 2**31 - 1, 3, 0.99, 0.99, 28)
+    cloud_node.comp_power = _default_comp_power(cloud_node.level)
     nodes.append(cloud_node)
     edge_nodes: List[Node] = []
 
@@ -149,9 +173,11 @@ def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
         """为两个节点补充一对带宽一致的双向链路。"""
         link_ab = LinkNode(a, b, default_band)
         link_ab.band_width = int(random.random() * sampled_span + sampled_min)
+        link_ab.energy_per_mb = _default_link_energy_per_mb(a.level, b.level)
         link_nodes.append(link_ab)
         link_ba = LinkNode(b, a, default_band)
         link_ba.band_width = link_ab.band_width
+        link_ba.energy_per_mb = _default_link_energy_per_mb(b.level, a.level)
         link_nodes.append(link_ba)
 
     add_bidirectional_link(edge_node1, edge_node2, 120, 100, 50)
@@ -160,9 +186,11 @@ def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
 
     link_node2c = LinkNode(edge_node2, cloud_node, 6)
     link_node2c.band_width = int(random.random() * 10 + 1)
+    link_node2c.energy_per_mb = _default_link_energy_per_mb(edge_node2.level, cloud_node.level)
     link_nodes.append(link_node2c)
     link_nodec2 = LinkNode(cloud_node, edge_node2, 6)
     link_nodec2.band_width = link_node2c.band_width
+    link_nodec2.energy_per_mb = _default_link_energy_per_mb(cloud_node.level, edge_node2.level)
     link_nodes.append(link_nodec2)
 
     add_bidirectional_link(edge_node2, edge_node3, 110, 100, 50)
@@ -174,9 +202,11 @@ def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
 
     link_node5c = LinkNode(edge_node5, cloud_node, 4)
     link_node5c.band_width = int(random.random() * 10 + 1)
+    link_node5c.energy_per_mb = _default_link_energy_per_mb(edge_node5.level, cloud_node.level)
     link_nodes.append(link_node5c)
     link_nodec5 = LinkNode(cloud_node, edge_node5, 4)
     link_nodec5.band_width = link_node5c.band_width
+    link_nodec5.energy_per_mb = _default_link_energy_per_mb(cloud_node.level, edge_node5.level)
     link_nodes.append(link_nodec5)
 
     add_bidirectional_link(edge_node6, edge_node7, 138, 100, 50)
@@ -184,25 +214,31 @@ def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
 
     link_node7c = LinkNode(edge_node7, cloud_node, 5)
     link_node7c.band_width = int(random.random() * 10 + 1)
+    link_node7c.energy_per_mb = _default_link_energy_per_mb(edge_node7.level, cloud_node.level)
     link_nodes.append(link_node7c)
     link_nodec7 = LinkNode(cloud_node, edge_node7, 5)
     link_node7c.band_width = link_node7c.getBandWidth()
+    link_nodec7.energy_per_mb = _default_link_energy_per_mb(cloud_node.level, edge_node7.level)
     link_nodes.append(link_nodec7)
 
     add_bidirectional_link(edge_node8, edge_node10, 130, 100, 50)
 
     link_node9c = LinkNode(edge_node9, cloud_node, 4)
     link_node9c.band_width = int(random.random() * 10 + 1)
+    link_node9c.energy_per_mb = _default_link_energy_per_mb(edge_node9.level, cloud_node.level)
     link_nodes.append(link_node9c)
     link_nodec9 = LinkNode(cloud_node, edge_node9, 4)
     link_nodec9.band_width = link_node9c.band_width
+    link_nodec9.energy_per_mb = _default_link_energy_per_mb(cloud_node.level, edge_node9.level)
     link_nodes.append(link_nodec9)
 
     link_node10c = LinkNode(edge_node10, cloud_node, 5)
     link_node10c.band_width = int(random.random() * 10 + 1)
+    link_node10c.energy_per_mb = _default_link_energy_per_mb(edge_node10.level, cloud_node.level)
     link_nodes.append(link_node10c)
     link_nodec10 = LinkNode(cloud_node, edge_node10, 5)
     link_nodec10.band_width = link_node10c.band_width
+    link_nodec10.energy_per_mb = _default_link_energy_per_mb(cloud_node.level, edge_node10.level)
     link_nodes.append(link_nodec10)
 
     for edge in edge_nodes:
@@ -214,8 +250,17 @@ def create_nodes() -> Tuple[List[Node], List[LinkNode]]:
             float_num = 1.0 + (random.random() * 3)
             band = 20 + int(random.random() * 31)
             user_node = Node(cpu, cpu, 1, reliable, accuracy, float_num)
-            link_nodes.append(LinkNode(user_node, edge, band))
-            link_nodes.append(LinkNode(edge, user_node, band))
+            user_node.comp_power = _default_comp_power(user_node.level)
+            link_user_edge = LinkNode(user_node, edge, band)
+            link_user_edge.energy_per_mb = _default_link_energy_per_mb(user_node.level, edge.level)
+            link_nodes.append(link_user_edge)
+            link_edge_user = LinkNode(edge, user_node, band)
+            link_edge_user.energy_per_mb = _default_link_energy_per_mb(edge.level, user_node.level)
+            link_nodes.append(link_edge_user)
             nodes.append(user_node)
+
+    for edge_node in nodes:
+        if edge_node.level in (2, 3):
+            edge_node.comp_power = _default_comp_power(edge_node.level)
 
     return nodes, link_nodes
