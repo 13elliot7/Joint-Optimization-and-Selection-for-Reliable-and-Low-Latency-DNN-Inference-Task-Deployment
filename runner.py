@@ -24,6 +24,7 @@ def main() -> None:
     )
     parser.add_argument("--tmax", type=int, default=40)
     parser.add_argument("--iteration-limit", type=int, default=120)
+    parser.add_argument("--quiet", action="store_true", help="只输出最终实验指标")
     args = parser.parse_args()
 
     if args.algorithm == "rtbl":
@@ -31,7 +32,7 @@ def main() -> None:
         print_metrics("RTBL", metrics)
         return
 
-    env = Environment(t_max=args.tmax)
+    env = Environment(t_max=args.tmax, verbose=not args.quiet)
     refactor = AllDNNRefactor(env)
     refactor.iteration_limit = args.iteration_limit
     initial_nodes = env.clone_nodes()

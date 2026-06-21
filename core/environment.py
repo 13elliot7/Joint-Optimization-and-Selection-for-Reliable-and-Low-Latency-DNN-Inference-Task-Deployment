@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from core.topology import create_dnns, create_nodes
 from models import DNN, LinkDNN, LinkNode, Node, RunningDNN, Task
@@ -36,6 +36,7 @@ class Environment:
     beta_l: float = 0.4
     lambda_g: float = 0.7
     l_min: float = 0.5
+    verbose: bool = True
 
     def __post_init__(self) -> None:
         """初始化拓扑、DNN 请求和动态运行状态。"""
@@ -43,6 +44,7 @@ class Environment:
         self.ds = create_dnns(self.t_max, self.nodes)
         self.graph_node: List[List[float]] = []
         self.get_graph_matrix()
+        self._build_path_cache()
         self.k = self._random_uniform(*self.k_range)
         self.rj_history = self._generate_rj_history()
         self.up = [True for _ in range(self.availability_node_count)]
@@ -86,6 +88,63 @@ class Environment:
             self.graph_node[s][e] = 1.0 / link_node.band_width
             self.graph_node[e][s] = 1.0 / link_node.band_width
 
+    def _build_path_cache(self) -> None:
+        """预计算固定网络拓扑中所有节点对的最短路径。"""
+        self._node_index_by_id = {id(node): idx for idx, node in enumerate(self.nodes)}
+        self._link_by_node_pair = {
+            (self._node_index_by_id[id(link.s_node)], self._node_index_by_id[id(link.e_node)]): link
+            for link in self.link_nodes
+        }
+        self._path_links: Dict[Tuple[int, int], tuple[LinkNode, ...]] = {}
+        self._path_delay_factors: Dict[Tuple[int, int], float] = {}
+        self._path_energy_factors: Dict[Tuple[int, int], float] = {}
+        for start in range(len(self.nodes)):
+            parents = self._get_shortest_path_parents(start)
+            for end in range(len(self.nodes)):
+                if start == end:
+                    links: tuple[LinkNode, ...] = ()
+                else:
+                    path = self._restore_shortest_path(parents, end)
+                    links = tuple(
+                        self._link_by_node_pair[(path[pos], path[pos + 1])]
+                        for pos in range(len(path) - 1)
+                    )
+                key = (start, end)
+                self._path_links[key] = links
+                self._path_delay_factors[key] = sum(
+                    1.0 / max(float(link.band_width), 1.0)
+                    for link in links
+                )
+                self._path_energy_factors[key] = sum(link.energy_per_mb for link in links)
+
+    def _get_shortest_path_parents(self, start: int) -> List[int]:
+        """按现有松弛语义计算一个起点对应的最短路径树。"""
+        parent = [-1 for _ in range(len(self.nodes))]
+        distance = [float("inf") for _ in range(len(self.nodes))]
+        distance[start] = 0.0
+        n = len(self.nodes)
+        for _ in range(n - 1):
+            for j in range(n):
+                for k in range(n):
+                    if (
+                        self.graph_node[j][k] != float("inf")
+                        and distance[j] != float("inf")
+                        and distance[j] + self.graph_node[j][k] < distance[k]
+                    ):
+                        distance[k] = distance[j] + self.graph_node[j][k]
+                        parent[k] = j
+        return parent
+
+    @staticmethod
+    def _restore_shortest_path(parent: List[int], end: int) -> List[int]:
+        """从最短路径树恢复指定终点的节点路径。"""
+        path: List[int] = []
+        current = end
+        while current != -1:
+            path.insert(0, current)
+            current = parent[current]
+        return path
+
     def check_resource(self, dnn: DNN, x: List[List[int]]) -> bool:
         """检查一个部署矩阵是否满足节点 CPU 约束。"""
         cpu_has = [node.cpu for node in self.nodes]
@@ -118,6 +177,8 @@ class Environment:
 
     def _print_initialization_summary(self) -> None:
         """打印环境初始化摘要。"""
+        if not self.verbose:
+            return
         cloud_count = sum(1 for node in self.nodes if node.level == 3)
         edge_count = sum(1 for node in self.nodes if node.level == 2)
         user_count = sum(1 for node in self.nodes if node.level == 1)
@@ -144,6 +205,8 @@ class Environment:
 
     def print_pending_dnn_info(self, dnn_index: int) -> None:
         """打印当前待接纳 DNN 的基础信息。"""
+        if not self.verbose:
+            return
         dnn = self.ds[dnn_index]
         print(
             "[PENDING] "
@@ -206,6 +269,59 @@ class Environment:
         """提取部署方案实际使用的唯一节点集合。"""
         del dnn_index
         return sorted({node_idx for node_idx in assignment if node_idx >= 0})
+
+    def path_transfer_delay(self, start_node_idx: int, end_node_idx: int, data_amount: float) -> float:
+        """使用预计算路径因子返回两个节点之间的传输时延。"""
+        return data_amount * self._path_delay_factors[(start_node_idx, end_node_idx)]
+
+    def predict_node_load_ratios(self, dnn_index: int, assignment: List[int]) -> Dict[int, float]:
+        """预测接纳候选部署后相关节点的负载率。"""
+        dnn = self.ds[dnn_index]
+        added_cpu: Dict[int, float] = {}
+        for task_idx, node_idx in enumerate(assignment):
+            added_cpu[node_idx] = added_cpu.get(node_idx, 0.0) + dnn.tasks[task_idx].cpu_need
+        return {
+            node_idx: node.load_ratio + added_cpu.get(node_idx, 0.0) / max(float(node.max_cpu), 1.0)
+            for node_idx, node in enumerate(self.nodes)
+            if node.load_ratio > 0 or node_idx in added_cpu
+        }
+
+    def predict_link_load_ratios(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        estimated_runtime: float,
+    ) -> Dict[LinkNode, float]:
+        """预测接纳候选部署后相关链路的负载率。"""
+        runtime = max(float(estimated_runtime), self.slot_length, 1.0)
+        link_weights = self._collect_link_weights(dnn_index, assignment)
+        return {
+            link: link.load_ratio + data_amount / runtime / max(float(link.band_width), 1.0)
+            for link, data_amount in link_weights.items()
+        }
+
+    def predict_path_state(
+        self,
+        start_node_idx: int,
+        end_node_idx: int,
+        data_amount: float,
+        estimated_runtime: float,
+    ) -> tuple[float, float]:
+        """预测一段候选流量经过路径后的可靠性和可行性得分。"""
+        runtime = max(float(estimated_runtime), self.slot_length, 1.0)
+        reliability = 1.0
+        overload = 0.0
+        links = self._path_links[(start_node_idx, end_node_idx)]
+        for link in links:
+            predicted_load = link.load_ratio + data_amount / runtime / max(float(link.band_width), 1.0)
+            base_reliability = link.base_reliability if link.base_reliability is not None else 1.0
+            predicted_reliability = base_reliability * math.exp(
+                -self.alpha_l * predicted_load - self.beta_l * link.heat
+            )
+            reliability *= min(base_reliability, max(self.l_min, predicted_reliability))
+            overload += max(0.0, predicted_load - 1.0)
+        feasibility = 1.0 / (1.0 + overload)
+        return reliability, feasibility
 
     def _add_path_link_weights(self, weights: Dict[LinkNode, float], links: List[LinkNode], data_amount: float) -> None:
         """把一段路径上的流量累计到链路权重表。"""
@@ -302,13 +418,14 @@ class Environment:
         # 接纳成功后立即把新 DNN 纳入当前占用，
         # 但热度和动态可靠性仍然只在时隙推进时更新。
         self.allocate_running_resources()
-        print(
-            "[ACCEPTED] "
-            f"slot={self.current_slot} "
-            f"dnn={dnn_index} "
-            f"estimated_runtime={estimated_runtime:.2f} "
-            f"required_slots={remaining_slots}"
-        )
+        if self.verbose:
+            print(
+                "[ACCEPTED] "
+                f"slot={self.current_slot} "
+                f"dnn={dnn_index} "
+                f"estimated_runtime={estimated_runtime:.2f} "
+                f"required_slots={remaining_slots}"
+            )
         return running_dnn
 
     def advance_time_slot(self) -> None:
@@ -378,17 +495,17 @@ class Environment:
         for link in self.link_nodes:
             current_used = used_bandwidth.get(id(link), 0.0)
             bandwidth = max(float(link.band_width), 1.0)
-            link.load_ratio = min(1.0, current_used / bandwidth)
+            link.load_ratio = current_used / bandwidth
 
     def update_node_heat(self) -> None:
-        """按遗忘系数更新节点热度。"""
+        """使用指数移动平均更新节点热度。"""
         for node in self.nodes:
-            node.heat = self.lambda_h * node.heat + node.load_ratio
+            node.heat = self.lambda_h * node.heat + (1.0 - self.lambda_h) * node.load_ratio
 
     def update_link_heat(self) -> None:
-        """按遗忘系数更新链路热度。"""
+        """使用指数移动平均更新链路热度。"""
         for link in self.link_nodes:
-            link.heat = self.lambda_g * link.heat + link.load_ratio
+            link.heat = self.lambda_g * link.heat + (1.0 - self.lambda_g) * link.load_ratio
 
     def refresh_dynamic_reliability(self) -> None:
         """依据负载和热度刷新节点与链路的动态可靠性。"""
@@ -408,6 +525,8 @@ class Environment:
 
     def _print_slot_summary(self, slot_id: int, finished_count: int) -> None:
         """打印单个时隙的运行摘要。"""
+        if not self.verbose:
+            return
         node_loads = [node.load_ratio for node in self.nodes]
         link_loads = [link.load_ratio for link in self.link_nodes]
         node_reliabilities = [node.o_reliability for node in self.nodes]
@@ -640,40 +759,13 @@ class Environment:
             return []
         if s is None or e is None:
             raise ValueError("Node assignment missing")
-        snode = self.nodes.index(s)
-        enode = self.nodes.index(e)
-        path = self.get_shortest_path(snode, enode)
-        links: List[LinkNode] = []
-        for p in range(len(path) - 1):
-            start = self.nodes[path[p]]
-            end = self.nodes[path[p + 1]]
-            for link in self.link_nodes:
-                if link.s_node is start and link.e_node is end:
-                    links.append(link)
-        return links
+        snode = self._node_index_by_id[id(s)]
+        enode = self._node_index_by_id[id(e)]
+        return list(self._path_links[(snode, enode)])
 
     def get_shortest_path(self, start: int, end: int) -> List[int]:
         """基于带宽倒数权重计算节点间最短路径。"""
-        parent = [-1 for _ in range(len(self.nodes))]
-        distance = [float("inf") for _ in range(len(self.nodes))]
-        distance[start] = 0.0
-        n = len(self.nodes)
-        for _ in range(n - 1):
-            for j in range(n):
-                for k in range(n):
-                    if (
-                        self.graph_node[j][k] != float("inf")
-                        and distance[j] != float("inf")
-                        and distance[j] + self.graph_node[j][k] < distance[k]
-                    ):
-                        distance[k] = distance[j] + self.graph_node[j][k]
-                        parent[k] = j
-        path: List[int] = []
-        current = end
-        while current != -1:
-            path.insert(0, current)
-            current = parent[current]
-        return path
+        return self._restore_shortest_path(self._get_shortest_path_parents(start), end)
 
     def count_accuracy(self, dnn: DNN, m: int, x: List[List[List[int]]]) -> float:
         """按原始静态模型计算精度可靠性。"""

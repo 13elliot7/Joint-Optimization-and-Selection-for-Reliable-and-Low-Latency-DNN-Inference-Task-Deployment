@@ -58,13 +58,18 @@ class RTBLScheduler:
         xj_t = [0 for _ in range(self.m)]
         selected_i = 10
         for i in range(10):
+            candidate_nodes = [j for j in range(self.m) if xij_t[i][j] == 1]
+            if not candidate_nodes or any(rj_t[j] != 1 for j in candidate_nodes):
+                continue
             for j in range(self.m):
-                if xij_t[i][j] == 1 and rj_t[j] == 1:
+                if xij_t[i][j] == 1:
                     x[task_index][j] = 1
             if self.env.check_resource(self.env.ds[dnn_index], x):
                 xj_t = xij_t[i]
                 selected_i = i
                 break
+            for j in candidate_nodes:
+                x[task_index][j] = 0
         if selected_i == 10 or xj_t == [0 for _ in range(self.m)]:
             return None
         d_t = 0.0
@@ -107,6 +112,7 @@ class RTBLRunner:
         r_res = 0.0
         a_res = 0.0
         failure_dnn = 0
+        success_dnn = 0
         run_time = __import__("time").monotonic()
         for t in range(self.env.t_max):
             self.scheduler.reset_q()
@@ -131,11 +137,13 @@ class RTBLRunner:
             if not success_deploy:
                 failure_dnn += 1
                 continue
-            if self.env.check_delay_random(self.env.ds[t], x):
-                for p in range(task_num):
-                    for j in range(self.config.M):
-                        if x[p][j] == 1:
-                            suiji[0][t][p] = j
+            if not self.env.check_delay_random(self.env.ds[t], x):
+                failure_dnn += 1
+                continue
+            for p in range(task_num):
+                for j in range(self.config.M):
+                    if x[p][j] == 1:
+                        suiji[0][t][p] = j
             f1 = self.env.count_values1_random(t, 0, suiji)
             f2 = self.env.count_values2_random(t, 0, suiji)
             f3 = self.env.count_values3_random(t, 0, suiji)
@@ -143,10 +151,11 @@ class RTBLRunner:
             t_res += 1 / f3
             r_res += f2
             a_res += f1
+            success_dnn += 1
         return ExperimentMetrics(
-            avg_delay=t_res / self.env.t_max if self.env.t_max else 0.0,
-            avg_operation=r_res / self.env.t_max if self.env.t_max else 0.0,
-            avg_accuracy=a_res / self.env.t_max if self.env.t_max else 0.0,
+            avg_delay=t_res / success_dnn if success_dnn else 0.0,
+            avg_operation=r_res / success_dnn if success_dnn else 0.0,
+            avg_accuracy=a_res / success_dnn if success_dnn else 0.0,
             avg_energy=0.0,
             failure_count=failure_dnn,
             runtime_ms=int((__import__("time").monotonic() - run_time) * 1000),

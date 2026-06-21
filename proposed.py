@@ -58,6 +58,11 @@ class AllDNNRefactor:
         self.pareto_level_sort: List[List[int]] = []
         self.distance = [[0 for _ in range(2 * self.pop_size)] for _ in range(1000)]
         self._path_transfer_cost_cache: Dict[tuple[int, int, float], float] = {}
+        self._assignment_evaluation_cache: Dict[
+            tuple[int, tuple[int, ...]],
+            tuple[float, float, float, float, float],
+        ] = {}
+        self._constraint_violation_cache: Dict[tuple[int, tuple[int, ...]], float] = {}
 
     def _new_population(self, population_size: int) -> List[List[List[int]]]:
         """创建指定规模的三维种群容器。"""
@@ -96,6 +101,33 @@ class AllDNNRefactor:
             value3 = float(1 / delay)
         return value1, value2, value3, value4, delay
 
+    def _evaluate_customized_assignment(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+    ) -> tuple[float, float, float, float, float]:
+        """在当前 DNN 搜索期间缓存定制化算法的候选评价。"""
+        assignment_slice = self._assignment_slice(dnn_index, assignment)
+        cache_key = (dnn_index, tuple(assignment_slice))
+        cached = self._assignment_evaluation_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        values = self._evaluate_assignment(dnn_index, assignment_slice)
+        self._assignment_evaluation_cache[cache_key] = values
+        return values
+
+    def _count_customized_values(self, dnn_index: int, individual_idx: int) -> float:
+        """评价定制化联合种群个体并返回其估计时延。"""
+        value1, value2, value3, value4, delay = self._evaluate_customized_assignment(
+            dnn_index,
+            self.res_pq[individual_idx][dnn_index],
+        )
+        self.function1_values[individual_idx] = value1
+        self.function2_values[individual_idx] = value2
+        self.function3_values[individual_idx] = value3
+        self.function4_values[individual_idx] = value4
+        return delay
+
     def _register_running_dnn(self, dnn_index: int, assignment: List[int], delay: float) -> None:
         """把已接纳的 DNN 注册成时隙级运行实体。"""
         # DNN 被接纳后不再是“部署即结束”，而是转成一个运行块，
@@ -118,6 +150,8 @@ class AllDNNRefactor:
 
     def _log_proposed_stage(self, dnn_index: int, phase: str, **kwargs: object) -> None:
         """打印 proposed 算法的阶段性日志。"""
+        if not self.env.verbose:
+            return
         details = " ".join(f"{key}={value}" for key, value in kwargs.items())
         if details:
             print(f"\t[PROPOSED] dnn={dnn_index} phase={phase} {details}")
@@ -215,13 +249,7 @@ class AllDNNRefactor:
         cache_key = (start_node_idx, end_node_idx, data_amount)
         if cache_key in self._path_transfer_cost_cache:
             return self._path_transfer_cost_cache[cache_key]
-        try:
-            links = self.env.get_arrive_link(self.env.nodes[start_node_idx], self.env.nodes[end_node_idx])
-        except ValueError:
-            return float("inf")
-        cost = 0.0
-        for link in links:
-            cost += data_amount / max(float(link.band_width), 1.0)
+        cost = self.env.path_transfer_delay(start_node_idx, end_node_idx, data_amount)
         self._path_transfer_cost_cache[cache_key] = cost
         return cost
 
@@ -247,32 +275,56 @@ class AllDNNRefactor:
         energy_score = 1.0 / (1.0 + energy)
 
         link_cost = 0.0
+        path_reliability_score = 1.0
+        path_feasibility_score = 1.0
+        predicted_runtime = max(float(dnn.delay), self.env.slot_length, 1.0)
         for pred in context.predecessors[task_idx]:
             pred_node_idx = assignment[pred]
             if pred_node_idx >= 0:
+                data_amount = context.edge_data.get((pred, task_idx), 0.0)
                 link_cost += self._path_transfer_cost(
                     pred_node_idx,
                     node_idx,
-                    context.edge_data.get((pred, task_idx), 0.0),
+                    data_amount,
                 )
+                path_reliability, path_feasibility = self.env.predict_path_state(
+                    pred_node_idx,
+                    node_idx,
+                    data_amount,
+                    predicted_runtime,
+                )
+                path_reliability_score *= path_reliability
+                path_feasibility_score *= path_feasibility
         for succ in context.successors[task_idx]:
             succ_node_idx = assignment[succ]
             if succ_node_idx >= 0:
+                data_amount = context.edge_data.get((task_idx, succ), 0.0)
                 link_cost += self._path_transfer_cost(
                     node_idx,
                     succ_node_idx,
-                    context.edge_data.get((task_idx, succ), 0.0),
+                    data_amount,
                 )
+                path_reliability, path_feasibility = self.env.predict_path_state(
+                    node_idx,
+                    succ_node_idx,
+                    data_amount,
+                    predicted_runtime,
+                )
+                path_reliability_score *= path_reliability
+                path_feasibility_score *= path_feasibility
         link_score = 1.0 / (1.0 + link_cost) if math.isfinite(link_cost) else 0.0
+        predicted_node_load = node.load_ratio + task.cpu_need / max(float(node.max_cpu), 1.0)
+        node_feasibility_score = 1.0 / (1.0 + max(0.0, predicted_node_load - 1.0))
+        feasibility_score = path_feasibility_score * node_feasibility_score
 
         weights_by_role = {
-            "balanced": (0.20, 0.20, 0.20, 0.20, 0.10, 0.10),
-            "reliability": (0.15, 0.15, 0.15, 0.35, 0.10, 0.10),
-            "latency": (0.15, 0.30, 0.30, 0.10, 0.05, 0.10),
-            "energy": (0.15, 0.15, 0.15, 0.15, 0.10, 0.30),
-            "feasibility": (0.35, 0.15, 0.15, 0.10, 0.20, 0.05),
+            "balanced": (0.15, 0.15, 0.15, 0.15, 0.15, 0.10, 0.05, 0.10),
+            "reliability": (0.10, 0.10, 0.10, 0.20, 0.25, 0.05, 0.05, 0.15),
+            "latency": (0.10, 0.25, 0.25, 0.10, 0.05, 0.05, 0.05, 0.15),
+            "energy": (0.10, 0.10, 0.10, 0.10, 0.10, 0.05, 0.30, 0.15),
+            "feasibility": (0.20, 0.10, 0.10, 0.10, 0.10, 0.10, 0.05, 0.25),
         }
-        w_cpu, w_time, w_link, w_rel, w_heat, w_e = weights_by_role.get(
+        w_cpu, w_time, w_link, w_node_rel, w_path_rel, w_heat, w_e, w_feasibility = weights_by_role.get(
             role,
             weights_by_role["balanced"],
         )
@@ -280,9 +332,11 @@ class AllDNNRefactor:
             w_cpu * cpu_score
             + w_time * exec_time_score
             + w_link * link_score
-            + w_rel * reliability_score
+            + w_node_rel * reliability_score
+            + w_path_rel * path_reliability_score
             + w_heat * heat_score
             + w_e * energy_score
+            + w_feasibility * feasibility_score
         )
 
     def _best_candidate_node(
@@ -540,6 +594,10 @@ class AllDNNRefactor:
         """计算时延、资源和层级约束的归一化违反度。"""
         dnn = self.env.ds[dnn_index]
         assignment_slice = self._assignment_slice(dnn_index, assignment)
+        cache_key = (dnn_index, tuple(assignment_slice))
+        cached = self._constraint_violation_cache.get(cache_key)
+        if cached is not None:
+            return cached
         if delay is None:
             delay = self.env.estimate_delay_from_assignment(dnn_index, assignment_slice)
         deadline = max(float(dnn.delay), 1.0)
@@ -580,7 +638,14 @@ class AllDNNRefactor:
                 if self.env.nodes[node_idx].level < self.env.nodes[pred_node_idx].level:
                     hierarchy_bad += 1
         hierarchy_violation = hierarchy_bad / max(hierarchy_total, 1)
-        return delay_violation + resource_violation + hierarchy_violation
+        predicted_link_loads = self.env.predict_link_load_ratios(dnn_index, assignment_slice, delay)
+        link_overload_violation = sum(
+            max(0.0, load_ratio - 1.0)
+            for load_ratio in predicted_link_loads.values()
+        ) / max(len(predicted_link_loads), 1)
+        violation = delay_violation + resource_violation + hierarchy_violation + link_overload_violation
+        self._constraint_violation_cache[cache_key] = violation
+        return violation
 
     def _customized_epsilon(self, generation: int) -> float:
         """动态约束阈值，随代数从宽松收缩到严格可行。"""
@@ -687,7 +752,7 @@ class AllDNNRefactor:
         max_e: float,
     ) -> tuple[float, float, float, float, float, float]:
         """返回局部搜索使用的目标值、时延和综合得分。"""
-        value1, value2, value3, value4, delay = self._evaluate_assignment(dnn_index, assignment)
+        value1, value2, value3, value4, delay = self._evaluate_customized_assignment(dnn_index, assignment)
         if value3 <= 0:
             score = -math.inf
         else:
@@ -1368,6 +1433,8 @@ class AllDNNRefactor:
             )
             context = self._build_dnn_context(t)
             self._path_transfer_cost_cache = {}
+            self._assignment_evaluation_cache = {}
+            self._constraint_violation_cache = {}
             best_value = [0.0, 0.0, -1.0, 0.0]
             best_assignment = [0 for _ in range(self.max_dnn_num)]
             self.res = self._new_population(self.pop_size)
@@ -1422,11 +1489,12 @@ class AllDNNRefactor:
                     self._write_customized_child(t, a1, b1, self.pop_size + m, context, role)
 
                 for m in range(len(self.res_pq)):
-                    self.count_values(t, m)
+                    delay = self._count_customized_values(t, m)
                     self.constraint_violations[m] = self._constraint_violation(
                         t,
                         self.res_pq[m][t],
                         context,
+                        delay,
                     )
                 bi = 0
                 for i in range(2 * self.pop_size):
@@ -1567,7 +1635,7 @@ class AllDNNRefactor:
             self.res_pq = self._new_population(self.pop_size)
             self.res_pq = self.res
             for m in range(len(self.res_pq)):
-                self.count_values(t, m)
+                self._count_customized_values(t, m)
             best_i = 0
             for i in range(self.pop_size):
                 if self.function3_values[i] > 0 and self.function3_values[best_i] < 0:
@@ -1673,7 +1741,7 @@ class AllDNNRefactor:
                 next_dnn_index += 1
                 self.env.advance_time_slot()
                 continue
-            _, _, _, _, delay = self._evaluate_assignment(t, best_assignment)
+            _, _, _, _, delay = self._evaluate_customized_assignment(t, best_assignment)
             total_energy = self.env.count_total_energy_by_assignment(t, self._assignment_slice(t, best_assignment))
             self._log_proposed_stage(
                 t,
