@@ -90,6 +90,8 @@ class LinkNode:
     s_node: Node
     e_node: Node
     band_width: int
+    base_band_width: int | None = None
+    effective_band_width: float | None = None
     base_reliability: float | None = None
     reliability: float | None = None
     load_ratio: float = 0.0
@@ -98,6 +100,10 @@ class LinkNode:
 
     def __post_init__(self) -> None:
         """在链路创建后补齐动态可靠性字段。"""
+        if self.base_band_width is None:
+            self.base_band_width = self.band_width
+        if self.effective_band_width is None:
+            self.effective_band_width = float(self.band_width)
         if self.base_reliability is None:
             self.base_reliability = 1.0
         if self.reliability is None:

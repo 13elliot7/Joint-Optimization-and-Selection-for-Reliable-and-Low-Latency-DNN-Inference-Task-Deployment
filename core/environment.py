@@ -36,6 +36,9 @@ class Environment:
     beta_l: float = 0.4
     lambda_g: float = 0.7
     l_min: float = 0.5
+    bandwidth_heat_gamma: float = 0.5
+    bandwidth_load_gamma: float = 0.3
+    min_bandwidth_ratio: float = 0.2
     verbose: bool = True
 
     def __post_init__(self) -> None:
@@ -222,10 +225,28 @@ class Environment:
     def _reset_link_state(self) -> None:
         """重置链路的先验可靠性和动态状态。"""
         for link in self.link_nodes:
+            link.base_band_width = link.band_width
+            link.effective_band_width = float(link.band_width)
             link.base_reliability = self._infer_link_base_reliability(link)
             link.reliability = link.base_reliability
             link.load_ratio = 0.0
             link.heat = 0.0
+
+    def get_effective_bandwidth(self, link: LinkNode) -> float:
+        """返回链路在当前负载和热度下的有效带宽。"""
+        base = float(link.base_band_width or link.band_width)
+        degradation = 1.0 + self.bandwidth_heat_gamma * link.heat + self.bandwidth_load_gamma * link.load_ratio
+        effective = base / max(degradation, 1.0)
+        return max(base * self.min_bandwidth_ratio, effective, 1.0)
+
+    def refresh_effective_bandwidth(self) -> None:
+        """根据当前链路负载和热度刷新有效带宽。"""
+        for link in self.link_nodes:
+            link.effective_band_width = self.get_effective_bandwidth(link)
+
+    def _link_transfer_delay(self, link: LinkNode, data_amount: float) -> float:
+        """使用当前有效带宽计算单条链路传输时延。"""
+        return data_amount / max(self.get_effective_bandwidth(link), 1.0)
 
     def _infer_link_base_reliability(self, link: LinkNode) -> float:
         """根据链路层级组合和带宽推断静态先验可靠性。"""
@@ -271,8 +292,11 @@ class Environment:
         return sorted({node_idx for node_idx in assignment if node_idx >= 0})
 
     def path_transfer_delay(self, start_node_idx: int, end_node_idx: int, data_amount: float) -> float:
-        """使用预计算路径因子返回两个节点之间的传输时延。"""
-        return data_amount * self._path_delay_factors[(start_node_idx, end_node_idx)]
+        """使用缓存路径和当前有效带宽返回两节点间传输时延。"""
+        return sum(
+            self._link_transfer_delay(link, data_amount)
+            for link in self._path_links[(start_node_idx, end_node_idx)]
+        )
 
     def predict_node_load_ratios(self, dnn_index: int, assignment: List[int]) -> Dict[int, float]:
         """预测接纳候选部署后相关节点的负载率。"""
@@ -296,7 +320,7 @@ class Environment:
         runtime = max(float(estimated_runtime), self.slot_length, 1.0)
         link_weights = self._collect_link_weights(dnn_index, assignment)
         return {
-            link: link.load_ratio + data_amount / runtime / max(float(link.band_width), 1.0)
+            link: link.load_ratio + data_amount / runtime / max(self.get_effective_bandwidth(link), 1.0)
             for link, data_amount in link_weights.items()
         }
 
@@ -313,7 +337,7 @@ class Environment:
         overload = 0.0
         links = self._path_links[(start_node_idx, end_node_idx)]
         for link in links:
-            predicted_load = link.load_ratio + data_amount / runtime / max(float(link.band_width), 1.0)
+            predicted_load = link.load_ratio + data_amount / runtime / max(self.get_effective_bandwidth(link), 1.0)
             base_reliability = link.base_reliability if link.base_reliability is not None else 1.0
             predicted_reliability = base_reliability * math.exp(
                 -self.alpha_l * predicted_load - self.beta_l * link.heat
@@ -436,6 +460,7 @@ class Environment:
         self.allocate_running_resources()
         self.update_node_heat()
         self.update_link_heat()
+        self.refresh_effective_bandwidth()
         self.refresh_dynamic_reliability()
         for running_dnn in self.running_dnns:
             if running_dnn.remaining_slots > 0:
@@ -494,7 +519,7 @@ class Environment:
                 used_bandwidth[id(link)] += data_amount / runtime
         for link in self.link_nodes:
             current_used = used_bandwidth.get(id(link), 0.0)
-            bandwidth = max(float(link.band_width), 1.0)
+            bandwidth = max(self.get_effective_bandwidth(link), 1.0)
             link.load_ratio = current_used / bandwidth
 
     def update_node_heat(self) -> None:
@@ -650,7 +675,7 @@ class Environment:
             if i == 0:
                 links = self.get_arrive_link(self.nodes[dnn.initiateNode], node)
                 for link in links:
-                    tran += dnn.startFloat / link.band_width
+                    tran += self._link_transfer_delay(link, dnn.startFloat)
             if node is not None:
                 tloc += task.float_num / node.float_rate
             next_tasks = self.get_next_dnn_tasks(dnn, task)
@@ -662,7 +687,7 @@ class Environment:
             if x[len(dnn.tasks) - 1][j] == 1:
                 links = self.get_arrive_link(self.nodes[j], self.nodes[dnn.initiateNode])
                 for link in links:
-                    tloc += dnn.backFloat / link.band_width
+                    tloc += self._link_transfer_delay(link, dnn.backFloat)
         return tloc + tran
 
     def count_delay_random(self, dnn: DNN, x: List[List[int]]) -> float:
@@ -680,7 +705,7 @@ class Environment:
             if i == 0:
                 links = self.get_arrive_link(self.nodes[dnn.initiateNode], node)
                 for link in links:
-                    tran += dnn.startFloat / link.band_width
+                    tran += self._link_transfer_delay(link, dnn.startFloat)
             if node is not None:
                 tloc += task.float_num / node.float_rate
             next_tasks = self.get_next_dnn_tasks(dnn, task)
@@ -692,7 +717,7 @@ class Environment:
             if x[len(dnn.tasks) - 1][j] == 1:
                 links = self.get_arrive_link(self.nodes[j], self.nodes[dnn.initiateNode])
                 for link in links:
-                    tloc += dnn.backFloat / link.band_width
+                    tloc += self._link_transfer_delay(link, dnn.backFloat)
         return tloc + tran
 
     def count_tran_delay_random(
@@ -721,7 +746,7 @@ class Environment:
                 enode = self.nodes[j]
         tran = 0.0
         for link in self.get_arrive_link(snode, enode):
-            tran += float_num / link.band_width
+            tran += self._link_transfer_delay(link, float_num)
         return tran
 
     def count_tran_delay(
@@ -750,7 +775,7 @@ class Environment:
                 enode = self.nodes[j]
         tran = 0.0
         for link in self.get_arrive_link(snode, enode):
-            tran += float_num / link.band_width
+            tran += self._link_transfer_delay(link, float_num)
         return tran
 
     def get_arrive_link(self, s: Node | None, e: Node | None) -> List[LinkNode]:
@@ -826,7 +851,7 @@ class Environment:
             if i == 0:
                 links = self.get_arrive_link(self.nodes[dnn.initiateNode], node)
                 for link in links:
-                    tran += dnn.startFloat / link.band_width
+                    tran += self._link_transfer_delay(link, dnn.startFloat)
             if node is not None:
                 tloc += task.float_num / node.float_rate
             next_tasks = self.get_next_dnn_tasks(dnn, task)
@@ -838,7 +863,7 @@ class Environment:
             if x[index][len(dnn.tasks) - 1][j] == 1:
                 links = self.get_arrive_link(self.nodes[j], self.nodes[dnn.initiateNode])
                 for link in links:
-                    tloc += dnn.backFloat / link.band_width
+                    tloc += self._link_transfer_delay(link, dnn.backFloat)
         return tloc + tran
 
     def count_values1_random(self, i: int, m: int, r: List[List[List[int]]]) -> float:
@@ -883,12 +908,12 @@ class Environment:
             if task_index == 0:
                 links = self.get_arrive_link(self.nodes[dnn.initiateNode], target_node)
                 for link in links:
-                    transmission_delay += dnn.startFloat / link.band_width
+                    transmission_delay += self._link_transfer_delay(link, dnn.startFloat)
             return_delay = 0.0
             if task_index == len(dnn.tasks) - 1:
                 links = self.get_arrive_link(target_node, self.nodes[dnn.initiateNode])
                 for link in links:
-                    return_delay += dnn.backFloat / link.band_width
+                    return_delay += self._link_transfer_delay(link, dnn.backFloat)
             inter_task_delay = 0.0
             max_inter_task_delay = 0.0
             for link in dnn.links:
@@ -903,7 +928,7 @@ class Environment:
                     predecessor_node = self.nodes[predecessor_node_index]
                     inter_links = self.get_arrive_link(predecessor_node, target_node)
                     for inter_link in inter_links:
-                        inter_task_delay1 = link.getFloatTran() / inter_link.band_width
+                        inter_task_delay1 = self._link_transfer_delay(inter_link, link.getFloatTran())
                         if inter_task_delay1 > max_inter_task_delay:
                             max_inter_task_delay = inter_task_delay1
             delay_costs[node_index] = computation_delay + transmission_delay + return_delay + inter_task_delay
