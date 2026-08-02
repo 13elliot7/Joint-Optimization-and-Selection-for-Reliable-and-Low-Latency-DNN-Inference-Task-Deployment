@@ -1,0 +1,285 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="956" viewBox="0 0 1180 956">
+<rect width="100%" height="100%" fill="white"/>
+<style><![CDATA[
+text{font-family:Arial,Helvetica,sans-serif;fill:#222} .title{font-size:18px;font-weight:700} .axis{stroke:#333;stroke-width:1} .grid{stroke:#e6e6e6;stroke-width:1} .tick{font-size:10px;fill:#555} .label{font-size:12px;fill:#222} .legend{font-size:11px;fill:#222}
+]]></style>
+<text class="title" x="590.0" y="30" text-anchor="middle">Sensitivity under Different Mutation Probabilities</text>
+<text class="label" x="280.0" y="73" text-anchor="middle">Service rel.</text>
+<line class="grid" x1="128.0" y1="264.0" x2="478.0" y2="264.0"/>
+<text class="tick" x="121.0" y="267.0" text-anchor="end">0.1</text>
+<line class="grid" x1="128.0" y1="219.0" x2="478.0" y2="219.0"/>
+<text class="tick" x="121.0" y="222.0" text-anchor="end">0.138</text>
+<line class="grid" x1="128.0" y1="174.0" x2="478.0" y2="174.0"/>
+<text class="tick" x="121.0" y="177.0" text-anchor="end">0.175</text>
+<line class="grid" x1="128.0" y1="129.0" x2="478.0" y2="129.0"/>
+<text class="tick" x="121.0" y="132.0" text-anchor="end">0.212</text>
+<line class="grid" x1="128.0" y1="84.0" x2="478.0" y2="84.0"/>
+<text class="tick" x="121.0" y="87.0" text-anchor="end">0.25</text>
+<line class="axis" x1="128.0" y1="264.0" x2="478.0" y2="264.0"/>
+<line class="axis" x1="128.0" y1="84.0" x2="128.0" y2="264.0"/>
+<line class="axis" x1="128.0" y1="264.0" x2="128.0" y2="268.0"/>
+<text class="tick" x="128.0" y="282.0" text-anchor="middle">0.1</text>
+<line class="axis" x1="198.0" y1="264.0" x2="198.0" y2="268.0"/>
+<text class="tick" x="198.0" y="282.0" text-anchor="middle">0.15</text>
+<line class="axis" x1="268.0" y1="264.0" x2="268.0" y2="268.0"/>
+<text class="tick" x="268.0" y="282.0" text-anchor="middle">0.2</text>
+<line class="axis" x1="338.0" y1="264.0" x2="338.0" y2="268.0"/>
+<text class="tick" x="338.0" y="282.0" text-anchor="middle">0.25</text>
+<line class="axis" x1="408.0" y1="264.0" x2="408.0" y2="268.0"/>
+<text class="tick" x="408.0" y="282.0" text-anchor="middle">0.3</text>
+<line class="axis" x1="478.0" y1="264.0" x2="478.0" y2="268.0"/>
+<text class="tick" x="478.0" y="282.0" text-anchor="middle">0.35</text>
+<text class="tick" x="82" y="174.0" transform="rotate(-90 82 174.0)" text-anchor="middle">Service rel.</text>
+<line x1="128.0" y1="207.3" x2="128.0" y2="239.1" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="122.5" y1="207.3" x2="133.5" y2="207.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="122.5" y1="239.1" x2="133.5" y2="239.1" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="198.0" y1="181.1" x2="198.0" y2="236.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="192.5" y1="181.1" x2="203.5" y2="181.1" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="192.5" y1="236.6" x2="203.5" y2="236.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="268.0" y1="177.7" x2="268.0" y2="226.8" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="262.5" y1="177.7" x2="273.5" y2="177.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="262.5" y1="226.8" x2="273.5" y2="226.8" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="338.0" y1="160.3" x2="338.0" y2="198.2" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="332.5" y1="160.3" x2="343.5" y2="160.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="332.5" y1="198.2" x2="343.5" y2="198.2" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="408.0" y1="167.6" x2="408.0" y2="210.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="402.5" y1="167.6" x2="413.5" y2="167.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="402.5" y1="210.6" x2="413.5" y2="210.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="478.0" y1="145.8" x2="478.0" y2="219.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="472.5" y1="145.8" x2="483.5" y2="145.8" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="472.5" y1="219.7" x2="483.5" y2="219.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<polygon points="128.2,224.4 198.2,210.1 197.8,207.7 127.8,222.0" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="198.1,210.1 268.1,203.5 267.9,201.1 197.9,207.7" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="268.4,203.4 338.4,180.4 337.6,178.2 267.6,201.2" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="337.8,180.5 407.8,190.3 408.2,187.9 338.2,178.1" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="408.1,190.3 478.1,184.0 477.9,181.6 407.9,187.9" fill="#1b6ca8" opacity="0.92"/>
+<circle cx="128.0" cy="223.2" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="198.0" cy="208.9" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="268.0" cy="202.3" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="338.0" cy="179.3" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="408.0" cy="189.1" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="478.0" cy="182.8" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<text class="label" x="750.0" y="73" text-anchor="middle">Accuracy rel.</text>
+<line class="grid" x1="598.0" y1="264.0" x2="948.0" y2="264.0"/>
+<text class="tick" x="591.0" y="267.0" text-anchor="end">0.65</text>
+<line class="grid" x1="598.0" y1="219.0" x2="948.0" y2="219.0"/>
+<text class="tick" x="591.0" y="222.0" text-anchor="end">0.7</text>
+<line class="grid" x1="598.0" y1="174.0" x2="948.0" y2="174.0"/>
+<text class="tick" x="591.0" y="177.0" text-anchor="end">0.75</text>
+<line class="grid" x1="598.0" y1="129.0" x2="948.0" y2="129.0"/>
+<text class="tick" x="591.0" y="132.0" text-anchor="end">0.8</text>
+<line class="grid" x1="598.0" y1="84.0" x2="948.0" y2="84.0"/>
+<text class="tick" x="591.0" y="87.0" text-anchor="end">0.85</text>
+<line class="axis" x1="598.0" y1="264.0" x2="948.0" y2="264.0"/>
+<line class="axis" x1="598.0" y1="84.0" x2="598.0" y2="264.0"/>
+<line class="axis" x1="598.0" y1="264.0" x2="598.0" y2="268.0"/>
+<text class="tick" x="598.0" y="282.0" text-anchor="middle">0.1</text>
+<line class="axis" x1="668.0" y1="264.0" x2="668.0" y2="268.0"/>
+<text class="tick" x="668.0" y="282.0" text-anchor="middle">0.15</text>
+<line class="axis" x1="738.0" y1="264.0" x2="738.0" y2="268.0"/>
+<text class="tick" x="738.0" y="282.0" text-anchor="middle">0.2</text>
+<line class="axis" x1="808.0" y1="264.0" x2="808.0" y2="268.0"/>
+<text class="tick" x="808.0" y="282.0" text-anchor="middle">0.25</text>
+<line class="axis" x1="878.0" y1="264.0" x2="878.0" y2="268.0"/>
+<text class="tick" x="878.0" y="282.0" text-anchor="middle">0.3</text>
+<line class="axis" x1="948.0" y1="264.0" x2="948.0" y2="268.0"/>
+<text class="tick" x="948.0" y="282.0" text-anchor="middle">0.35</text>
+<text class="tick" x="552" y="174.0" transform="rotate(-90 552 174.0)" text-anchor="middle">Accuracy rel.</text>
+<line x1="598.0" y1="137.8" x2="598.0" y2="191.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="592.5" y1="137.8" x2="603.5" y2="137.8" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="592.5" y1="191.3" x2="603.5" y2="191.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="668.0" y1="143.6" x2="668.0" y2="201.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="662.5" y1="143.6" x2="673.5" y2="143.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="662.5" y1="201.6" x2="673.5" y2="201.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="738.0" y1="146.8" x2="738.0" y2="198.9" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="732.5" y1="146.8" x2="743.5" y2="146.8" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="732.5" y1="198.9" x2="743.5" y2="198.9" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="808.0" y1="147.8" x2="808.0" y2="201.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="802.5" y1="147.8" x2="813.5" y2="147.8" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="802.5" y1="201.7" x2="813.5" y2="201.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="878.0" y1="150.0" x2="878.0" y2="200.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="872.5" y1="150.0" x2="883.5" y2="150.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="872.5" y1="200.7" x2="883.5" y2="200.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="948.0" y1="151.4" x2="948.0" y2="199.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="942.5" y1="151.4" x2="953.5" y2="151.4" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="942.5" y1="199.0" x2="953.5" y2="199.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<polygon points="597.9,165.7 667.9,173.8 668.1,171.4 598.1,163.3" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="668.0,173.8 738.0,174.1 738.0,171.7 668.0,171.4" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="738.0,174.1 808.0,176.0 808.0,173.6 738.0,171.7" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="808.0,176.0 878.0,176.6 878.0,174.2 808.0,173.6" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="878.0,176.6 948.0,176.4 948.0,174.0 878.0,174.2" fill="#1b6ca8" opacity="0.92"/>
+<circle cx="598.0" cy="164.5" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="668.0" cy="172.6" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="738.0" cy="172.9" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="808.0" cy="174.8" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="878.0" cy="175.4" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="948.0" cy="175.2" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<text class="label" x="280.0" y="369" text-anchor="middle">Energy</text>
+<line class="grid" x1="128.0" y1="560.0" x2="478.0" y2="560.0"/>
+<text class="tick" x="121.0" y="563.0" text-anchor="end">0</text>
+<line class="grid" x1="128.0" y1="515.0" x2="478.0" y2="515.0"/>
+<text class="tick" x="121.0" y="518.0" text-anchor="end">2.5e+03</text>
+<line class="grid" x1="128.0" y1="470.0" x2="478.0" y2="470.0"/>
+<text class="tick" x="121.0" y="473.0" text-anchor="end">5e+03</text>
+<line class="grid" x1="128.0" y1="425.0" x2="478.0" y2="425.0"/>
+<text class="tick" x="121.0" y="428.0" text-anchor="end">7.5e+03</text>
+<line class="grid" x1="128.0" y1="380.0" x2="478.0" y2="380.0"/>
+<text class="tick" x="121.0" y="383.0" text-anchor="end">1e+04</text>
+<line class="axis" x1="128.0" y1="560.0" x2="478.0" y2="560.0"/>
+<line class="axis" x1="128.0" y1="380.0" x2="128.0" y2="560.0"/>
+<line class="axis" x1="128.0" y1="560.0" x2="128.0" y2="564.0"/>
+<text class="tick" x="128.0" y="578.0" text-anchor="middle">0.1</text>
+<line class="axis" x1="198.0" y1="560.0" x2="198.0" y2="564.0"/>
+<text class="tick" x="198.0" y="578.0" text-anchor="middle">0.15</text>
+<line class="axis" x1="268.0" y1="560.0" x2="268.0" y2="564.0"/>
+<text class="tick" x="268.0" y="578.0" text-anchor="middle">0.2</text>
+<line class="axis" x1="338.0" y1="560.0" x2="338.0" y2="564.0"/>
+<text class="tick" x="338.0" y="578.0" text-anchor="middle">0.25</text>
+<line class="axis" x1="408.0" y1="560.0" x2="408.0" y2="564.0"/>
+<text class="tick" x="408.0" y="578.0" text-anchor="middle">0.3</text>
+<line class="axis" x1="478.0" y1="560.0" x2="478.0" y2="564.0"/>
+<text class="tick" x="478.0" y="578.0" text-anchor="middle">0.35</text>
+<text class="tick" x="82" y="470.0" transform="rotate(-90 82 470.0)" text-anchor="middle">Energy</text>
+<line x1="128.0" y1="434.0" x2="128.0" y2="444.2" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="122.5" y1="434.0" x2="133.5" y2="434.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="122.5" y1="444.2" x2="133.5" y2="444.2" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="198.0" y1="436.0" x2="198.0" y2="452.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="192.5" y1="436.0" x2="203.5" y2="436.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="192.5" y1="452.3" x2="203.5" y2="452.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="268.0" y1="438.9" x2="268.0" y2="453.9" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="262.5" y1="438.9" x2="273.5" y2="438.9" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="262.5" y1="453.9" x2="273.5" y2="453.9" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="338.0" y1="443.7" x2="338.0" y2="457.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="332.5" y1="443.7" x2="343.5" y2="443.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="332.5" y1="457.6" x2="343.5" y2="457.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="408.0" y1="445.4" x2="408.0" y2="454.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="402.5" y1="445.4" x2="413.5" y2="445.4" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="402.5" y1="454.3" x2="413.5" y2="454.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="478.0" y1="440.3" x2="478.0" y2="458.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="472.5" y1="440.3" x2="483.5" y2="440.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="472.5" y1="458.3" x2="483.5" y2="458.3" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<polygon points="127.9,440.3 197.9,445.3 198.1,442.9 128.1,437.9" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="198.0,445.3 268.0,447.6 268.0,445.2 198.0,442.9" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="267.9,447.6 337.9,451.9 338.1,449.5 268.1,445.2" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="338.0,451.9 408.0,451.0 408.0,448.6 338.0,449.5" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="408.0,451.0 478.0,450.5 478.0,448.1 408.0,448.6" fill="#1b6ca8" opacity="0.92"/>
+<circle cx="128.0" cy="439.1" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="198.0" cy="444.1" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="268.0" cy="446.4" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="338.0" cy="450.7" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="408.0" cy="449.8" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="478.0" cy="449.3" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<text class="label" x="750.0" y="369" text-anchor="middle">Failed</text>
+<line class="grid" x1="598.0" y1="560.0" x2="948.0" y2="560.0"/>
+<text class="tick" x="591.0" y="563.0" text-anchor="end">0</text>
+<line class="grid" x1="598.0" y1="515.0" x2="948.0" y2="515.0"/>
+<text class="tick" x="591.0" y="518.0" text-anchor="end">0.5</text>
+<line class="grid" x1="598.0" y1="470.0" x2="948.0" y2="470.0"/>
+<text class="tick" x="591.0" y="473.0" text-anchor="end">1</text>
+<line class="grid" x1="598.0" y1="425.0" x2="948.0" y2="425.0"/>
+<text class="tick" x="591.0" y="428.0" text-anchor="end">1.5</text>
+<line class="grid" x1="598.0" y1="380.0" x2="948.0" y2="380.0"/>
+<text class="tick" x="591.0" y="383.0" text-anchor="end">2</text>
+<line class="axis" x1="598.0" y1="560.0" x2="948.0" y2="560.0"/>
+<line class="axis" x1="598.0" y1="380.0" x2="598.0" y2="560.0"/>
+<line class="axis" x1="598.0" y1="560.0" x2="598.0" y2="564.0"/>
+<text class="tick" x="598.0" y="578.0" text-anchor="middle">0.1</text>
+<line class="axis" x1="668.0" y1="560.0" x2="668.0" y2="564.0"/>
+<text class="tick" x="668.0" y="578.0" text-anchor="middle">0.15</text>
+<line class="axis" x1="738.0" y1="560.0" x2="738.0" y2="564.0"/>
+<text class="tick" x="738.0" y="578.0" text-anchor="middle">0.2</text>
+<line class="axis" x1="808.0" y1="560.0" x2="808.0" y2="564.0"/>
+<text class="tick" x="808.0" y="578.0" text-anchor="middle">0.25</text>
+<line class="axis" x1="878.0" y1="560.0" x2="878.0" y2="564.0"/>
+<text class="tick" x="878.0" y="578.0" text-anchor="middle">0.3</text>
+<line class="axis" x1="948.0" y1="560.0" x2="948.0" y2="564.0"/>
+<text class="tick" x="948.0" y="578.0" text-anchor="middle">0.35</text>
+<text class="tick" x="552" y="470.0" transform="rotate(-90 552 470.0)" text-anchor="middle">Failed</text>
+<line x1="598.0" y1="430.1" x2="598.0" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="592.5" y1="430.1" x2="603.5" y2="430.1" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="592.5" y1="560.0" x2="603.5" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="668.0" y1="504.1" x2="668.0" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="662.5" y1="504.1" x2="673.5" y2="504.1" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="662.5" y1="560.0" x2="673.5" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="738.0" y1="522.5" x2="738.0" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="732.5" y1="522.5" x2="743.5" y2="522.5" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="732.5" y1="560.0" x2="743.5" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="808.0" y1="489.5" x2="808.0" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="802.5" y1="489.5" x2="813.5" y2="489.5" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="802.5" y1="560.0" x2="813.5" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="878.0" y1="504.1" x2="878.0" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="872.5" y1="504.1" x2="883.5" y2="504.1" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="872.5" y1="560.0" x2="883.5" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="948.0" y1="489.5" x2="948.0" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="942.5" y1="489.5" x2="953.5" y2="489.5" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="942.5" y1="560.0" x2="953.5" y2="560.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<polygon points="597.5,507.1 667.5,543.1 668.5,540.9 598.5,504.9" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="667.8,543.2 737.8,552.2 738.2,549.8 668.2,540.8" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="738.3,552.2 808.3,534.2 807.7,531.8 737.7,549.8" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="807.8,534.2 877.8,543.2 878.2,540.8 808.2,531.8" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="878.2,543.2 948.2,534.2 947.8,531.8 877.8,540.8" fill="#1b6ca8" opacity="0.92"/>
+<circle cx="598.0" cy="506.0" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="668.0" cy="542.0" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="738.0" cy="551.0" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="808.0" cy="533.0" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="878.0" cy="542.0" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="948.0" cy="533.0" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<text class="label" x="280.0" y="665" text-anchor="middle">Runtime (ms)</text>
+<line class="grid" x1="128.0" y1="856.0" x2="478.0" y2="856.0"/>
+<text class="tick" x="121.0" y="859.0" text-anchor="end">0</text>
+<line class="grid" x1="128.0" y1="811.0" x2="478.0" y2="811.0"/>
+<text class="tick" x="121.0" y="814.0" text-anchor="end">5e+04</text>
+<line class="grid" x1="128.0" y1="766.0" x2="478.0" y2="766.0"/>
+<text class="tick" x="121.0" y="769.0" text-anchor="end">1e+05</text>
+<line class="grid" x1="128.0" y1="721.0" x2="478.0" y2="721.0"/>
+<text class="tick" x="121.0" y="724.0" text-anchor="end">1.5e+05</text>
+<line class="grid" x1="128.0" y1="676.0" x2="478.0" y2="676.0"/>
+<text class="tick" x="121.0" y="679.0" text-anchor="end">2e+05</text>
+<line class="axis" x1="128.0" y1="856.0" x2="478.0" y2="856.0"/>
+<line class="axis" x1="128.0" y1="676.0" x2="128.0" y2="856.0"/>
+<line class="axis" x1="128.0" y1="856.0" x2="128.0" y2="860.0"/>
+<text class="tick" x="128.0" y="874.0" text-anchor="middle">0.1</text>
+<line class="axis" x1="198.0" y1="856.0" x2="198.0" y2="860.0"/>
+<text class="tick" x="198.0" y="874.0" text-anchor="middle">0.15</text>
+<line class="axis" x1="268.0" y1="856.0" x2="268.0" y2="860.0"/>
+<text class="tick" x="268.0" y="874.0" text-anchor="middle">0.2</text>
+<line class="axis" x1="338.0" y1="856.0" x2="338.0" y2="860.0"/>
+<text class="tick" x="338.0" y="874.0" text-anchor="middle">0.25</text>
+<line class="axis" x1="408.0" y1="856.0" x2="408.0" y2="860.0"/>
+<text class="tick" x="408.0" y="874.0" text-anchor="middle">0.3</text>
+<line class="axis" x1="478.0" y1="856.0" x2="478.0" y2="860.0"/>
+<text class="tick" x="478.0" y="874.0" text-anchor="middle">0.35</text>
+<text class="tick" x="82" y="766.0" transform="rotate(-90 82 766.0)" text-anchor="middle">Runtime (ms)</text>
+<line x1="128.0" y1="777.1" x2="128.0" y2="781.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="122.5" y1="777.1" x2="133.5" y2="777.1" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="122.5" y1="781.7" x2="133.5" y2="781.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="198.0" y1="774.0" x2="198.0" y2="778.4" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="192.5" y1="774.0" x2="203.5" y2="774.0" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="192.5" y1="778.4" x2="203.5" y2="778.4" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="268.0" y1="770.5" x2="268.0" y2="775.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="262.5" y1="770.5" x2="273.5" y2="770.5" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="262.5" y1="775.6" x2="273.5" y2="775.6" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="338.0" y1="768.7" x2="338.0" y2="772.8" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="332.5" y1="768.7" x2="343.5" y2="768.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="332.5" y1="772.8" x2="343.5" y2="772.8" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="408.0" y1="765.2" x2="408.0" y2="769.5" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="402.5" y1="765.2" x2="413.5" y2="765.2" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="402.5" y1="769.5" x2="413.5" y2="769.5" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="478.0" y1="761.4" x2="478.0" y2="767.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="472.5" y1="761.4" x2="483.5" y2="761.4" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<line x1="472.5" y1="767.7" x2="483.5" y2="767.7" stroke="#1b6ca8" stroke-width="1.0" opacity="0.68"/>
+<polygon points="128.1,780.6 198.1,777.4 197.9,775.0 127.9,778.2" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="198.1,777.4 268.1,774.3 267.9,771.9 197.9,775.0" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="268.0,774.3 338.0,772.0 338.0,769.6 268.0,771.9" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="338.1,772.0 408.1,768.6 407.9,766.2 337.9,769.6" fill="#1b6ca8" opacity="0.92"/>
+<polygon points="408.0,768.6 478.0,765.7 478.0,763.3 408.0,766.2" fill="#1b6ca8" opacity="0.92"/>
+<circle cx="128.0" cy="779.4" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="198.0" cy="776.2" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="268.0" cy="773.1" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="338.0" cy="770.8" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="408.0" cy="767.4" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<circle cx="478.0" cy="764.5" r="3.5" fill="#1b6ca8" stroke="white" stroke-width="0.9"/>
+<line x1="1010" y1="78" x2="1026" y2="78" stroke="#1b6ca8" stroke-width="2.4"/>
+<circle cx="1018" cy="78" r="3.2" fill="#1b6ca8"/>
+<text class="legend" x="1033" y="82">DAREED</text>
+</svg>

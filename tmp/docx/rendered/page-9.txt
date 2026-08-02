@@ -1,0 +1,44 @@
+Author action:
+We revised the reliability model in Section 4 to include dynamic link reliability and
+used-link sets in service reliability calculation.
+
+Reviewer#2, Concern#4: The simulation environment is quite small and limited to
+only 10 edge nodes and 1 central cloud. It is suggested to test the model with larger
+network topologies.
+
+Author response:
+Thanks for the suggestion. We have added a large-scale network evaluation. The
+revised experimental design includes small, medium, and large network scenarios. .
+
+Author action:
+We added the “Large-scale Network Evaluation” subsection in Section 6.
+
+Reviewer#2, Concern#5: The time complexity is quite high and will degrade at larger
+scale.
+
+Author response:
+Thanks for the comment. We have revised the algorithm design to include complexity
+analysis and scalability-oriented mechanisms. DAREED limits exhaustive search by
+using DAG-aware initialization, resource-aware mutation, constraint repair, and elite
+local search. These mechanisms reduce invalid exploration and guide the population
+toward feasible regions. We also added runtime reporting in the scalability
+experiments.
+
+Author action:
+We revised Section 5 to include complexity analysis and revised Section 6 to report
+running time under different request loads and network scales.
+
+Reviewer#2, Concern#6: The proposed framework assumes a static network
+environment, while practical network conditions are dynamic.
+
+Author response:
+Thanks for the suggestion. The revised framework is explicitly dynamic. DNN
+requests arrive online. Accepted requests become running blocks and occupy node
+and link resources for multiple time slots. Node load, link load, heat state, effective
+bandwidth, node reliability, link reliability, and inference accuracy are updated as the
+system evolves.
+
+Author action:
+We revised Section 4 to include dynamic state transition model(equations *,*,*) and
+revised Section 5 to explain online execution of DAREED.
+

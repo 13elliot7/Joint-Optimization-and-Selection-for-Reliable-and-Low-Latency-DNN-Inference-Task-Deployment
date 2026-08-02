@@ -1,0 +1,38 @@
+Response to Reviewer #3
+
+Reviewer#3, Concern#1: RDODA is essentially a direct application of classic NSGA-
+II using standard genetic operations. It lacks customized algorithmic designs tailored
+to DNN graph dependencies or edge networks.
+
+Author response:
+Thanks for the critical comment. We have redesigned the algorithm and renamed it
+DAREED. The revised algorithm is no longer a direct use of standard NSGA-II.
+DAREED incorporates DNN topology and dynamic resource states into the whole
+evolutionary process. Customized algorithmic designs tailored to DNN graph
+dependencies or edge networks, Specifically, it builds DAG context information,
+initializes the population with topology-aware and resource-aware modes, performs
+DAG block crossover, applies resource-aware skew mutation, repairs infeasible
+individuals, uses constraint-dominance sorting, refines elite individuals through local
+search, and selects the final deployment according to request preferences and energy
+cost.
+
+Author action:
+We rewrote Section 5 as “Algorithm Design” for DAREED and added detailed
+descriptions of each customized mechanism.
+
+Reviewer#3, Concern#2: The strategy of assigning negative fitness values to
+individuals violating the delay constraint is overly simplistic and may destroy
+population diversity.
+
+Author response:
+Thanks for the suggestion. We replaced the previous penalty treatment with a
+constraint-aware mechanism. DAREED evaluates constraint violation separately from
+objective values. Feasible individuals dominate infeasible ones, and infeasible
+individuals with smaller violations are retained when useful for guiding search. This
+approach maintains population diversity while reducing the probability of selecting
+severely infeasible solutions.
+
+Author action:
+We revised Section 5 to include constraint-aware repair and constraint-dominance
+sorting.
+

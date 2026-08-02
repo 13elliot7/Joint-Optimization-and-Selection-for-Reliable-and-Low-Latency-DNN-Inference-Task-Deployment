@@ -1,0 +1,45 @@
+Reviewer#1, Concern#8: Constraints sum over all tasks and layers, suggesting joint
+deployment across multiple tasks. Meanwhile, objective functions are written with a
+single-task form, which can confuse whether the optimization is per-task or multi-
+task.
+
+Author response:
+Thanks for pointing out this ambiguity. We have clarified that the deployment process
+is online. DAREED optimizes the deployment of the newly arrived DNN request
+under the current system state. Previously accepted requests are modeled as running
+blocks that occupy node and link resources for several time slots. Therefore, the
+current request is optimized individually, while global resource constraints are
+affected by all currently running requests.
+
+Author action:
+We revised Section 4 to introduce the running-block model and dynamic state
+transition constraint. We also revised Section 5 to explain that DAREED is executed
+for each newly arrived request under the current resource state.
+
+Reviewer#1, Concern#9: The simulation assumes the central cloud has unlimited
+resources and high service reliability. Adding stress tests with constrained cloud
+compute, reduced cloud reliability, or tighter cloud-edge bandwidth would better
+demonstrate the reliability-delay trade-off.
+
+Author response:
+Thanks for the valuable suggestion. We have added a cloud-side stress test to evaluate
+whether DAREED depends on idealized cloud conditions. The revised experiment
+includes constrained cloud compute, degraded cloud reliability and inference
+accuracy, and narrowed edge-cloud bandwidth. This setting is designed to show how
+DAREED shifts deployment decisions among cloud, edge, and end resources when
+the cloud is no longer uniformly advantageous.
+
+Author action:
+We added a “Cloud Constraint Stress Test” subsection in Section 6, including the
+planned figure and table for service reliability, inference accuracy, inference delay,
+total energy consumption, and failed deployments.
+
+Reviewer#1, Concern#10: The manuscript claims the highest hypervolume value, but
+does not clarify whether the reported hypervolume values are directly comparable
+across algorithms under identical normalization and reference point settings.
+
+Author response:
+Thanks for the comment. We have clarified the hypervolume calculation procedure.
+In the revised evaluation, Pareto-front quality is measured in the normalized
+objective space of service reliability, inference accuracy, and delay satisfaction. All
+

@@ -23,6 +23,38 @@ class DNNContext:
     candidate_nodes: Dict[int, List[int]]
 
 
+@dataclass(frozen=True)
+class RepairResult:
+    """记录一次结构修复的结果，避免非法个体被静默写回种群。"""
+
+    assignment: List[int]
+    success: bool
+    changed_gene_count: int
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class ObjectiveValues:
+    """同时保存可审计原值和统一的四目标最大化满意度向量。"""
+
+    inference_fidelity: float
+    operational_stability: float
+    delay_satisfaction: float
+    energy_satisfaction: float
+    estimated_delay: float
+    total_energy: float
+    deadline_feasible: bool
+
+    @property
+    def vector(self) -> tuple[float, float, float, float]:
+        return (
+            self.inference_fidelity,
+            self.operational_stability,
+            self.delay_satisfaction,
+            self.energy_satisfaction,
+        )
+
+
 def _java_div(numerator: float, denominator: float) -> float:
     """按 Java 风格处理零除场景的除法。"""
     if denominator == 0:
@@ -37,32 +69,234 @@ class AllDNNRefactor:
         """初始化主算法与三个基线共享的运行状态。"""
         self.env = env or Environment()
         self.pop_size = 60
-        self.gen = 1000
-        self.iteration_limit = 120
+        self.iteration_limit = 200
         self.max_dnn_num = 20
-        self.mutate_pm = 0.1
+        self.mutate_pm = 0.25
         self.cross_over_pm = 0.5
-        self.customized_membrane_roles = ["reliability", "latency", "energy", "feasibility"]
+        self.customized_membrane_roles = ["stability", "latency", "energy", "feasibility"]
         self.cv_initial_epsilon = 0.35
         self.local_search_elite_ratio = 0.05
         self.local_search_top_k = 3
+        self.preference = "adaptive"
+        self.use_dag_aware_initialization = True
+        self.use_dag_block_crossover = True
+        self.use_skew_mutation = True
+        self.use_elite_local_search = True
+        self.use_predicted_quality_scores = True
+        self.collect_pareto_points = False
+        self.pareto_points: List[Dict[str, float | int | str]] = []
+        self.population_roles: List[str] = []
+        self._joint_population_roles: List[str] = []
+        self.operator_stats: Dict[str, int] = {}
+        self.sa_steps_multiplier = 2
+        self.sa_initial_temperature = 1.0
+        self.sa_final_temperature = 0.01
+        self.sa_weight_profiles = [
+            "adaptive",
+            "delay_sensitive",
+            "stability_sensitive",
+            "energy_sensitive",
+            "balanced",
+        ]
         self.start_time = 0.0
         self.res: List[List[List[int]]] = []
-        self.res_next: List[List[List[int]]] = []
         self.res_pq: List[List[List[int]]] = []
         self.function1_values = [0.0 for _ in range(2 * self.pop_size)]
         self.function2_values = [0.0 for _ in range(2 * self.pop_size)]
         self.function3_values = [0.0 for _ in range(2 * self.pop_size)]
         self.function4_values = [0.0 for _ in range(2 * self.pop_size)]
+        self.estimated_delay_values = [math.inf for _ in range(2 * self.pop_size)]
+        self.total_energy_values = [math.inf for _ in range(2 * self.pop_size)]
+        self.deadline_feasible_values = [False for _ in range(2 * self.pop_size)]
         self.constraint_violations = [0.0 for _ in range(2 * self.pop_size)]
         self.pareto_level_sort: List[List[int]] = []
         self.distance = [[0 for _ in range(2 * self.pop_size)] for _ in range(1000)]
         self._path_transfer_cost_cache: Dict[tuple[int, int, float], float] = {}
         self._assignment_evaluation_cache: Dict[
             tuple[int, tuple[int, ...]],
-            tuple[float, float, float, float, float],
+            ObjectiveValues,
         ] = {}
         self._constraint_violation_cache: Dict[tuple[int, tuple[int, ...]], float] = {}
+        self._max_resource_delay_cache: Dict[tuple[int, ...], float] = {}
+        self._max_resource_last_delay: float | None = None
+        self.max_resource_fast_top_k = 8
+        self.max_resource_fast_beam_width = 30
+        self.max_resource_fast_budget_ms = 3000
+
+    def _resolve_preference_weights(
+        self,
+        dnn_index: int,
+        min_a: float,
+        max_a: float,
+        min_r: float,
+        max_r: float,
+        min_t: float,
+        max_t: float,
+    ) -> tuple[float, float, float, float]:
+        """按应用偏好返回最终解选择权重。"""
+        explicit_weights = {
+            "delay_sensitive": (0.10, 0.15, 0.60, 0.15),
+            "stability_sensitive": (0.30, 0.45, 0.15, 0.10),
+            "energy_sensitive": (0.10, 0.15, 0.15, 0.60),
+            "balanced": (0.25, 0.25, 0.25, 0.25),
+        }
+        if self.preference in explicit_weights:
+            return explicit_weights[self.preference]
+
+        raw_w_t = self._clamp_satisfaction(
+            _java_div(max_t - self.env.ds[dnn_index].delay, max_t - min_t)
+        )
+        raw_w_a = self._clamp_satisfaction(
+            _java_div(
+                self.env.ds[dnn_index].preference_fidelity - min_a,
+                max_a - min_a,
+            )
+        )
+        raw_w_r = self._clamp_satisfaction(
+            _java_div(
+                self.env.ds[dnn_index].preference_stability - min_r,
+                max_r - min_r,
+            )
+        )
+        w_e = 0.2
+        remaining_weight = 1.0 - w_e
+        base_weight_sum = raw_w_t + raw_w_a + raw_w_r
+        if base_weight_sum > 0:
+            scale = remaining_weight / base_weight_sum
+            return raw_w_a * scale, raw_w_r * scale, raw_w_t * scale, w_e
+        return remaining_weight / 3, remaining_weight / 3, remaining_weight / 3, w_e
+
+    @staticmethod
+    def _clamp_satisfaction(value: float) -> float:
+        """把统一目标限制到稳定的满意度区间。"""
+        return max(0.0, min(1.0, float(value)))
+
+    @staticmethod
+    def _dominates_objectives(
+        left: tuple[float, float, float, float],
+        right: tuple[float, float, float, float],
+    ) -> bool:
+        """对四个“越大越好”的统一满意度目标执行支配判断。"""
+        not_worse = all(left_value >= right_value for left_value, right_value in zip(left, right))
+        strictly_better = any(left_value > right_value for left_value, right_value in zip(left, right))
+        return not_worse and strictly_better
+
+    @classmethod
+    def _point_objective_vector(
+        cls,
+        point: Dict[str, float | int | str],
+    ) -> tuple[float, float, float, float]:
+        """从导出点读取与搜索阶段完全一致的统一目标向量。"""
+        return (
+            cls._clamp_satisfaction(
+                float(point.get("inference_fidelity_satisfaction", 0.0))
+            ),
+            cls._clamp_satisfaction(
+                float(point.get("operational_stability_satisfaction", 0.0))
+            ),
+            cls._clamp_satisfaction(float(point["delay_satisfaction"])),
+            cls._clamp_satisfaction(float(point["energy_satisfaction"])),
+        )
+
+    @classmethod
+    def _dominates_point(
+        cls,
+        left: Dict[str, float | int | str],
+        right: Dict[str, float | int | str],
+    ) -> bool:
+        """按统一四目标满意度向量判断导出点支配关系。"""
+        return cls._dominates_objectives(
+            cls._point_objective_vector(left),
+            cls._point_objective_vector(right),
+        )
+
+    def _pareto_point_from_values(
+        self,
+        algorithm: str,
+        dnn_index: int,
+        individual_index: int,
+        values: ObjectiveValues,
+    ) -> Dict[str, float | int | str] | None:
+        """把已评价目标值转换成 Pareto 导出点。"""
+        if not values.deadline_feasible:
+            return None
+        deadline = float(self.env.ds[dnn_index].delay)
+        return {
+            "algorithm": algorithm,
+            "dnn_index": dnn_index,
+            "individual_index": individual_index,
+            "inference_fidelity": values.inference_fidelity,
+            "operational_stability": values.operational_stability,
+            "delay_utility": values.delay_satisfaction,
+            "total_energy": values.total_energy,
+            "inference_fidelity_satisfaction": values.inference_fidelity,
+            "operational_stability_satisfaction": values.operational_stability,
+            "objective_semantics_version": self.env.objective_semantics_version,
+            "energy_satisfaction": values.energy_satisfaction,
+            "estimated_delay": values.estimated_delay,
+            "deadline": deadline,
+            "delay_satisfaction": values.delay_satisfaction,
+        }
+
+    def _append_current_pareto_points(self, algorithm: str, dnn_index: int, population_size: int) -> None:
+        """从当前已评价种群中导出可行非支配点。"""
+        if not self.collect_pareto_points:
+            return
+        points: List[Dict[str, float | int | str]] = []
+        for idx in range(population_size):
+            if not self.deadline_feasible_values[idx] or self.constraint_violations[idx] > 1e-12:
+                continue
+            assignment = self.res_pq[idx][dnn_index]
+            point = self._pareto_point_from_values(
+                algorithm,
+                dnn_index,
+                idx,
+                self._evaluate_assignment(dnn_index, assignment),
+            )
+            if point is not None:
+                points.append(point)
+        for point in points:
+            if not any(
+                other is not point and self._dominates_point(other, point)
+                for other in points
+            ):
+                self.pareto_points.append(point)
+
+    def _assignment_pareto_point(
+        self,
+        algorithm: str,
+        dnn_index: int,
+        assignment: List[int],
+        individual_index: int,
+    ) -> Dict[str, float | int | str] | None:
+        """把一个可行部署向量转换成四目标 Pareto 候选点。"""
+        if not self.collect_pareto_points:
+            return None
+        values = self._evaluate_assignment(dnn_index, assignment)
+        return self._pareto_point_from_values(
+            algorithm,
+            dnn_index,
+            individual_index,
+            values,
+        )
+
+    def _filter_pareto_points(
+        self,
+        points: List[Dict[str, float | int | str]],
+    ) -> List[Dict[str, float | int | str]]:
+        """按当前四目标口径过滤非支配点。"""
+        if not self.collect_pareto_points:
+            return []
+        filtered: List[Dict[str, float | int | str]] = []
+        seen: set[tuple[float, float, float, float]] = set()
+        for point in points:
+            key = self._point_objective_vector(point)
+            if key in seen:
+                continue
+            seen.add(key)
+            if not any(other is not point and self._dominates_point(other, point) for other in points):
+                filtered.append(point)
+        return filtered
 
     def _new_population(self, population_size: int) -> List[List[List[int]]]:
         """创建指定规模的三维种群容器。"""
@@ -86,26 +320,53 @@ class AllDNNRefactor:
         """截取当前 DNN 实际使用长度的部署向量。"""
         return list(assignment[: len(self.env.ds[dnn_index].tasks)])
 
-    def _evaluate_assignment(self, dnn_index: int, assignment: List[int]) -> tuple[float, float, float, float, float]:
-        """计算一个候选部署的三目标值、能耗收益与估计时延。"""
-        # 所有算法统一复用这套动态评价：当前节点/链路可靠性
-        # 加上基于原始关键路径估计得到的时延收益。
+    def _evaluate_assignment(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        known_delay: float | None = None,
+    ) -> ObjectiveValues:
+        """计算原始指标，并转换为统一的四目标最大化满意度表示。"""
         assignment_slice = self._assignment_slice(dnn_index, assignment)
-        value1 = float(self.env.count_dynamic_accuracy_by_assignment(dnn_index, assignment_slice))
-        value2 = float(self.env.count_dynamic_operation_by_assignment(dnn_index, assignment_slice))
-        value4 = float(self.env.count_energy_utility_by_assignment(dnn_index, assignment_slice))
-        delay = self.env.estimate_delay_from_assignment(dnn_index, assignment_slice)
-        if delay > self.env.ds[dnn_index].delay:
-            value3 = float(self.env.ds[dnn_index].delay - delay)
+        delay = known_delay
+        if delay is None:
+            delay = self.env.estimate_delay_from_assignment(dnn_index, assignment_slice)
+        if self.use_predicted_quality_scores:
+            quality_scores = self.env.predict_candidate_scores_by_assignment(
+                dnn_index,
+                assignment_slice,
+                delay,
+            )
+            value1 = quality_scores.inference_fidelity
+            value2 = quality_scores.operational_stability
         else:
-            value3 = float(1 / delay)
-        return value1, value2, value3, value4, delay
+            value1 = float(
+                self.env.count_inference_fidelity_by_assignment(dnn_index, assignment_slice)
+            )
+            value2 = float(
+                self.env.count_operational_stability_by_assignment(dnn_index, assignment_slice)
+            )
+        total_energy = float(self.env.count_total_energy_by_assignment(dnn_index, assignment_slice))
+        deadline = float(self.env.ds[dnn_index].delay)
+        deadline_feasible = delay <= deadline
+        delay_satisfaction = 0.0
+        if deadline > 0:
+            delay_satisfaction = self._clamp_satisfaction((deadline - delay) / deadline)
+        return ObjectiveValues(
+            inference_fidelity=self._clamp_satisfaction(value1),
+            operational_stability=self._clamp_satisfaction(value2),
+            delay_satisfaction=delay_satisfaction,
+            energy_satisfaction=self.env.energy_satisfaction(dnn_index, total_energy),
+            estimated_delay=float(delay),
+            total_energy=total_energy,
+            deadline_feasible=deadline_feasible,
+        )
 
     def _evaluate_customized_assignment(
         self,
         dnn_index: int,
         assignment: List[int],
-    ) -> tuple[float, float, float, float, float]:
+    ) -> ObjectiveValues:
         """在当前 DNN 搜索期间缓存定制化算法的候选评价。"""
         assignment_slice = self._assignment_slice(dnn_index, assignment)
         cache_key = (dnn_index, tuple(assignment_slice))
@@ -118,15 +379,24 @@ class AllDNNRefactor:
 
     def _count_customized_values(self, dnn_index: int, individual_idx: int) -> float:
         """评价定制化联合种群个体并返回其估计时延。"""
-        value1, value2, value3, value4, delay = self._evaluate_customized_assignment(
+        values = self._evaluate_customized_assignment(
             dnn_index,
             self.res_pq[individual_idx][dnn_index],
         )
-        self.function1_values[individual_idx] = value1
-        self.function2_values[individual_idx] = value2
-        self.function3_values[individual_idx] = value3
-        self.function4_values[individual_idx] = value4
-        return delay
+        self._write_objective_values(individual_idx, values)
+        return values.estimated_delay
+
+    def _write_objective_values(self, individual_idx: int, values: ObjectiveValues) -> None:
+        """把统一目标和对应原始指标写入并行种群缓存。"""
+        (
+            self.function1_values[individual_idx],
+            self.function2_values[individual_idx],
+            self.function3_values[individual_idx],
+            self.function4_values[individual_idx],
+        ) = values.vector
+        self.estimated_delay_values[individual_idx] = values.estimated_delay
+        self.total_energy_values[individual_idx] = values.total_energy
+        self.deadline_feasible_values[individual_idx] = values.deadline_feasible
 
     def _register_running_dnn(self, dnn_index: int, assignment: List[int], delay: float) -> None:
         """把已接纳的 DNN 注册成时隙级运行实体。"""
@@ -137,8 +407,6 @@ class AllDNNRefactor:
         self.env.add_running_dnn(
             dnn_index=dnn_index,
             assignment=assignment_slice,
-            arrival_time=self.env.current_slot,
-            start_time=self.env.current_slot,
             estimated_runtime=delay,
             remaining_slots=remaining_slots,
         )
@@ -162,12 +430,34 @@ class AllDNNRefactor:
         """检查一维部署向量是否满足资源和节点层级约束。"""
         dnn = self.env.ds[dnn_index]
         task_count = len(dnn.tasks)
+        if len(assignment) < task_count:
+            return False
+        if any(node_idx < 0 or node_idx >= len(self.env.nodes) for node_idx in assignment[:task_count]):
+            return False
         xs = self._build_assignment_matrix(dnn_index, assignment[:task_count])
         if not self.env.check_resource(dnn, xs):
             return False
         for task_idx in range(task_count):
             node_idx = assignment[task_idx]
             if self.env.nodes[node_idx].level == 1 and node_idx != dnn.initiateNode:
+                return False
+        return True
+
+    def _is_hierarchy_valid(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        context: DNNContext,
+    ) -> bool:
+        """检查 DAG 内部部署是否遵守端到边到云的非回退层级约束。"""
+        if not self._is_assignment_valid(dnn_index, assignment):
+            return False
+        for task_idx in context.topological_order:
+            node_level = self.env.nodes[assignment[task_idx]].level
+            if any(
+                node_level < self.env.nodes[assignment[pred]].level
+                for pred in context.predecessors[task_idx]
+            ):
                 return False
         return True
 
@@ -269,14 +559,13 @@ class AllDNNRefactor:
         cpu_score = node.cpu / node.max_cpu if node.max_cpu else 0.0
         exec_time = task.float_num / node.float_rate if node.float_rate else float("inf")
         exec_time_score = 1.0 / (1.0 + exec_time)
-        reliability_score = (node.o_reliability + node.a_reliability) / 2.0
+        quality_score = (node.operational_stability + node.inference_fidelity) / 2.0
         heat_score = 1.0 / (1.0 + node.heat + node.load_ratio)
         energy = node.comp_power * exec_time if math.isfinite(exec_time) else float("inf")
         energy_score = 1.0 / (1.0 + energy)
 
         link_cost = 0.0
-        path_reliability_score = 1.0
-        path_feasibility_score = 1.0
+        path_transfers: List[tuple[int, int, float]] = []
         predicted_runtime = max(float(dnn.delay), self.env.slot_length, 1.0)
         for pred in context.predecessors[task_idx]:
             pred_node_idx = assignment[pred]
@@ -287,14 +576,7 @@ class AllDNNRefactor:
                     node_idx,
                     data_amount,
                 )
-                path_reliability, path_feasibility = self.env.predict_path_state(
-                    pred_node_idx,
-                    node_idx,
-                    data_amount,
-                    predicted_runtime,
-                )
-                path_reliability_score *= path_reliability
-                path_feasibility_score *= path_feasibility
+                path_transfers.append((pred_node_idx, node_idx, data_amount))
         for succ in context.successors[task_idx]:
             succ_node_idx = assignment[succ]
             if succ_node_idx >= 0:
@@ -304,14 +586,11 @@ class AllDNNRefactor:
                     succ_node_idx,
                     data_amount,
                 )
-                path_reliability, path_feasibility = self.env.predict_path_state(
-                    node_idx,
-                    succ_node_idx,
-                    data_amount,
-                    predicted_runtime,
-                )
-                path_reliability_score *= path_reliability
-                path_feasibility_score *= path_feasibility
+                path_transfers.append((node_idx, succ_node_idx, data_amount))
+        path_stability_score, path_feasibility_score = self.env.predict_paths_state(
+            path_transfers,
+            predicted_runtime,
+        )
         link_score = 1.0 / (1.0 + link_cost) if math.isfinite(link_cost) else 0.0
         predicted_node_load = node.load_ratio + task.cpu_need / max(float(node.max_cpu), 1.0)
         node_feasibility_score = 1.0 / (1.0 + max(0.0, predicted_node_load - 1.0))
@@ -319,12 +598,12 @@ class AllDNNRefactor:
 
         weights_by_role = {
             "balanced": (0.15, 0.15, 0.15, 0.15, 0.15, 0.10, 0.05, 0.10),
-            "reliability": (0.10, 0.10, 0.10, 0.20, 0.25, 0.05, 0.05, 0.15),
+            "stability": (0.10, 0.10, 0.10, 0.20, 0.25, 0.05, 0.05, 0.15),
             "latency": (0.10, 0.25, 0.25, 0.10, 0.05, 0.05, 0.05, 0.15),
             "energy": (0.10, 0.10, 0.10, 0.10, 0.10, 0.05, 0.30, 0.15),
             "feasibility": (0.20, 0.10, 0.10, 0.10, 0.10, 0.10, 0.05, 0.25),
         }
-        w_cpu, w_time, w_link, w_node_rel, w_path_rel, w_heat, w_e, w_feasibility = weights_by_role.get(
+        w_cpu, w_time, w_link, w_node_quality, w_path_stability, w_heat, w_e, w_feasibility = weights_by_role.get(
             role,
             weights_by_role["balanced"],
         )
@@ -332,8 +611,8 @@ class AllDNNRefactor:
             w_cpu * cpu_score
             + w_time * exec_time_score
             + w_link * link_score
-            + w_node_rel * reliability_score
-            + w_path_rel * path_reliability_score
+            + w_node_quality * quality_score
+            + w_path_stability * path_stability_score
             + w_heat * heat_score
             + w_e * energy_score
             + w_feasibility * feasibility_score
@@ -362,12 +641,18 @@ class AllDNNRefactor:
             key=lambda node_idx: self._candidate_score(dnn_index, task_idx, node_idx, assignment, context),
         )
 
-    def _repair_assignment(self, dnn_index: int, assignment: List[int], context: DNNContext) -> List[int]:
-        """修复交叉/变异后违反层级或资源约束的部署方案。"""
+    def _repair_assignment_result(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        context: DNNContext,
+    ) -> RepairResult:
+        """修复结构约束并显式返回成功状态和修改规模。"""
+        original_assignment = self._assignment_slice(dnn_index, assignment)
         repaired = self._assignment_slice(dnn_index, assignment)
         dnn = self.env.ds[dnn_index]
         for task_idx in context.topological_order:
-            if repaired[task_idx] < 0:
+            if repaired[task_idx] < 0 or repaired[task_idx] >= len(self.env.nodes):
                 repaired[task_idx] = self._best_candidate_node(dnn_index, task_idx, repaired, context)
             required_level = 1
             for pred in context.predecessors[task_idx]:
@@ -386,8 +671,12 @@ class AllDNNRefactor:
                     min_level=required_level,
                 )
 
-        if self._is_assignment_valid(dnn_index, repaired):
-            return repaired
+        if self._is_hierarchy_valid(dnn_index, repaired, context):
+            return RepairResult(
+                repaired,
+                True,
+                sum(left != right for left, right in zip(original_assignment, repaired)),
+            )
 
         # 资源仍冲突时，优先迁移非关键路径任务，降低关键路径扰动。
         task_order = sorted(
@@ -395,7 +684,7 @@ class AllDNNRefactor:
             key=lambda idx: (idx in context.critical_path_tasks, -len(context.successors[idx])),
         )
         for task_idx in task_order:
-            original = repaired[task_idx]
+            original_node = repaired[task_idx]
             required_level = 1
             for pred in context.predecessors[task_idx]:
                 required_level = max(required_level, self.env.nodes[repaired[pred]].level)
@@ -410,23 +699,49 @@ class AllDNNRefactor:
             )
             for node_idx in ranked_candidates[:5]:
                 repaired[task_idx] = node_idx
-                if self._is_assignment_valid(dnn_index, repaired):
-                    return repaired
-            repaired[task_idx] = original
-        return self._assignment_slice(dnn_index, assignment)
+                if self._is_hierarchy_valid(dnn_index, repaired, context):
+                    return RepairResult(
+                        list(repaired),
+                        True,
+                        sum(left != right for left, right in zip(original_assignment, repaired)),
+                    )
+            repaired[task_idx] = original_node
+        return RepairResult(
+            original_assignment,
+            False,
+            0,
+            "no_structurally_feasible_repair",
+        )
 
-    def _weighted_choice(self, weighted_candidates: List[tuple[int, float]]) -> int:
-        """按候选权重随机选择一个节点。"""
-        total = sum(max(weight, 0.0) for _, weight in weighted_candidates)
-        if total <= 0:
+    def _repair_assignment(self, dnn_index: int, assignment: List[int], context: DNNContext) -> List[int]:
+        """兼容旧调用方；修复失败时安全回退到输入部署。"""
+        result = self._repair_assignment_result(dnn_index, assignment, context)
+        return result.assignment
+
+    def _weighted_choice(
+        self,
+        weighted_candidates: List[tuple[int, float]],
+        temperature: float = 0.35,
+    ) -> int:
+        """使用数值稳定的 softmax 按候选评分采样节点。"""
+        if not weighted_candidates:
+            raise ValueError("weighted_candidates must not be empty")
+        max_score = max(score for _, score in weighted_candidates)
+        safe_temperature = max(temperature, 1e-6)
+        probabilities = [
+            (node_idx, math.exp((score - max_score) / safe_temperature))
+            for node_idx, score in weighted_candidates
+        ]
+        total = sum(weight for _, weight in probabilities)
+        if total <= 0 or not math.isfinite(total):
             return weighted_candidates[int(random.random() * len(weighted_candidates))][0]
         cursor = random.random() * total
         acc = 0.0
-        for node_idx, weight in weighted_candidates:
-            acc += max(weight, 0.0)
+        for node_idx, weight in probabilities:
+            acc += weight
             if acc >= cursor:
                 return node_idx
-        return weighted_candidates[-1][0]
+        return probabilities[-1][0]
 
     def _skew_mutate_assignment(
         self,
@@ -439,7 +754,7 @@ class AllDNNRefactor:
         mutated = self._assignment_slice(dnn_index, assignment)
         if random.random() >= self.mutate_pm:
             return mutated
-        task_pool = list(context.critical_path_tasks) or list(range(len(mutated)))
+        task_pool = sorted(context.critical_path_tasks) or list(range(len(mutated)))
         if random.random() < 0.5:
             task_idx = task_pool[int(random.random() * len(task_pool))]
         else:
@@ -454,11 +769,53 @@ class AllDNNRefactor:
             )
             for node_idx in context.candidate_nodes[task_idx]
             if self.env.nodes[node_idx].level >= required_level
+            and node_idx != mutated[task_idx]
         ]
         if not weighted:
             return mutated
+        min_score = min(score for _, score in weighted)
+        max_score = max(score for _, score in weighted)
+        if max_score > min_score:
+            weighted = [
+                (node_idx, (score - min_score) / (max_score - min_score))
+                for node_idx, score in weighted
+            ]
         mutated[task_idx] = self._weighted_choice(weighted)
-        return self._repair_assignment(dnn_index, mutated, context)
+        repair = self._repair_assignment_result(dnn_index, mutated, context)
+        if repair.success:
+            self.operator_stats["effective_mutations"] = self.operator_stats.get("effective_mutations", 0) + 1
+            return repair.assignment
+        self.operator_stats["failed_mutations"] = self.operator_stats.get("failed_mutations", 0) + 1
+        return self._assignment_slice(dnn_index, assignment)
+
+    def _dag_crossover_block(self, context: DNNContext, task_count: int) -> List[int]:
+        """选择一个大小受控的后继闭包作为 DAG 交叉块。"""
+        if task_count <= 1:
+            return list(range(task_count))
+        max_block_size = max(2, math.ceil(task_count * 0.4))
+        blocks: List[List[int]] = []
+        fallback_blocks: List[List[int]] = []
+        for anchor in context.topological_order:
+            descendants: Set[int] = {anchor}
+            pending = [anchor]
+            while pending:
+                current = pending.pop()
+                for successor in context.successors[current]:
+                    if successor not in descendants:
+                        descendants.add(successor)
+                        pending.append(successor)
+            block = sorted(descendants)
+            if len(block) < task_count:
+                fallback_blocks.append(block)
+            if 2 <= len(block) <= max_block_size:
+                blocks.append(block)
+        candidates = blocks or fallback_blocks
+        if not candidates:
+            return [context.topological_order[-1]]
+        if not blocks:
+            min_size = min(len(block) for block in candidates)
+            candidates = [block for block in candidates if len(block) == min_size]
+        return candidates[int(random.random() * len(candidates))]
 
     def _dag_block_crossover(
         self,
@@ -467,24 +824,31 @@ class AllDNNRefactor:
         parent_b: List[int],
         context: DNNContext,
     ) -> tuple[List[int], List[int]]:
-        """按 DAG 拓扑边界交换父代片段。"""
+        """交换大小受控的 DAG 后继闭包，并限制 repair 对遗传信息的覆盖。"""
         task_count = len(self.env.ds[dnn_index].tasks)
         child_a = self._assignment_slice(dnn_index, parent_a)
         child_b = self._assignment_slice(dnn_index, parent_b)
         if task_count <= 1:
             return child_a, child_b
-        boundary_pool = sorted(context.critical_path_tasks)
-        boundary_pool = [idx for idx in boundary_pool if 0 < idx < task_count]
-        if boundary_pool:
-            boundary = boundary_pool[int(random.random() * len(boundary_pool))]
-        else:
-            boundary = 1 + int(random.random() * (task_count - 1))
-        swapped_tasks = [idx for idx in context.topological_order if idx >= boundary]
+        swapped_tasks = self._dag_crossover_block(context, task_count)
         for task_idx in swapped_tasks:
             child_a[task_idx] = parent_b[task_idx]
             child_b[task_idx] = parent_a[task_idx]
-        child_a = self._repair_assignment(dnn_index, child_a, context)
-        child_b = self._repair_assignment(dnn_index, child_b, context)
+        repair_a = self._repair_assignment_result(dnn_index, child_a, context)
+        repair_b = self._repair_assignment_result(dnn_index, child_b, context)
+        repair_limit = max(1, len(swapped_tasks) // 2)
+        if repair_a.success and repair_a.changed_gene_count <= repair_limit:
+            child_a = repair_a.assignment
+        else:
+            child_a = self._assignment_slice(dnn_index, parent_a)
+        if repair_b.success and repair_b.changed_gene_count <= repair_limit:
+            child_b = repair_b.assignment
+        else:
+            child_b = self._assignment_slice(dnn_index, parent_b)
+        if child_a != self._assignment_slice(dnn_index, parent_a):
+            self.operator_stats["effective_crossovers"] = self.operator_stats.get("effective_crossovers", 0) + 1
+        else:
+            self.operator_stats["no_change_crossovers"] = self.operator_stats.get("no_change_crossovers", 0) + 1
         return child_a, child_b
 
     def _write_customized_child(
@@ -497,14 +861,37 @@ class AllDNNRefactor:
         role: str = "balanced",
     ) -> None:
         """生成并写入定制化 RDODA 子代。"""
-        child_a, child_b = self._dag_block_crossover(
-            dnn_index,
-            self.res[parent_a_idx][dnn_index],
-            self.res[parent_b_idx][dnn_index],
-            context,
-        )
-        child_a = self._skew_mutate_assignment(dnn_index, child_a, context, role)
-        child_b = self._skew_mutate_assignment(dnn_index, child_b, context, role)
+        parent_a = self._assignment_slice(dnn_index, self.res[parent_a_idx][dnn_index])
+        parent_b = self._assignment_slice(dnn_index, self.res[parent_b_idx][dnn_index])
+        if random.random() < self.cross_over_pm:
+            self.operator_stats["crossover_attempts"] = self.operator_stats.get("crossover_attempts", 0) + 1
+            if self.use_dag_block_crossover:
+                child_a, child_b = self._dag_block_crossover(
+                    dnn_index,
+                    parent_a,
+                    parent_b,
+                    context,
+                )
+            else:
+                child_a = list(parent_a)
+                child_b = list(parent_b)
+                if len(child_a) > 1:
+                    boundary = 1 + int(random.random() * (len(child_a) - 1))
+                    for task_idx in range(boundary, len(child_a)):
+                        child_a[task_idx], child_b[task_idx] = child_b[task_idx], child_a[task_idx]
+                repair_a = self._repair_assignment_result(dnn_index, child_a, context)
+                repair_b = self._repair_assignment_result(dnn_index, child_b, context)
+                child_a = repair_a.assignment if repair_a.success else parent_a
+                child_b = repair_b.assignment if repair_b.success else parent_b
+        else:
+            child_a = parent_a
+            child_b = parent_b
+        if self.use_skew_mutation:
+            child_a = self._skew_mutate_assignment(dnn_index, child_a, context, role)
+            child_b = self._skew_mutate_assignment(dnn_index, child_b, context, role)
+        else:
+            child_a = self._mutate_assignment(dnn_index, child_a)
+            child_b = self._mutate_assignment(dnn_index, child_b)
         self._write_child(dnn_index, child_a, target_index)
         self._write_child(dnn_index, child_b, target_index + 1)
 
@@ -522,11 +909,14 @@ class AllDNNRefactor:
             elif mode == "resource":
                 candidates = context.candidate_nodes[task_idx]
                 assignment[task_idx] = max(candidates, key=lambda idx: self.env.nodes[idx].cpu)
-            elif mode == "reliability":
+            elif mode == "stability":
                 candidates = context.candidate_nodes[task_idx]
                 assignment[task_idx] = max(
                     candidates,
-                    key=lambda idx: self.env.nodes[idx].o_reliability * self.env.nodes[idx].a_reliability,
+                    key=lambda idx: (
+                        self.env.nodes[idx].operational_stability
+                        * self.env.nodes[idx].inference_fidelity
+                    ),
                 )
             elif mode == "topology":
                 assignment[task_idx] = self._best_candidate_node(dnn_index, task_idx, assignment, context)
@@ -536,15 +926,102 @@ class AllDNNRefactor:
         return self._repair_assignment(dnn_index, assignment, context)
 
     def _initialize_customized_population(self, dnn_index: int, context: DNNContext) -> bool:
-        """用拓扑和边缘网络启发式初始化改进算法种群。"""
-        modes = ["cloud", "local", "resource", "reliability", "topology", "random"]
-        for individual_idx in range(self.pop_size):
-            mode = modes[individual_idx % len(modes)]
-            assignment = self._heuristic_assignment(dnn_index, context, mode)
-            if not self._is_assignment_valid(dnn_index, assignment):
+        """用去重模板、模板扰动和随机可行解构造多样化种群。"""
+        if not self.use_dag_aware_initialization:
+            return self._initialize_random_customized_population(dnn_index, context)
+        task_count = len(self.env.ds[dnn_index].tasks)
+        modes = ["cloud", "local", "resource", "stability", "topology"]
+        assignments: List[List[int]] = []
+        seen: Set[tuple[int, ...]] = set()
+
+        def add_assignment(assignment: List[int]) -> bool:
+            key = tuple(self._assignment_slice(dnn_index, assignment))
+            if key in seen or not self._is_hierarchy_valid(dnn_index, assignment, context):
                 return False
+            seen.add(key)
+            assignments.append(list(key))
+            return True
+
+        for mode in modes:
+            assignment = self._heuristic_assignment(dnn_index, context, mode)
+            add_assignment(assignment)
+
+        target_unique = min(self.pop_size, max(len(assignments), math.ceil(self.pop_size * 0.75)))
+        attempts = 0
+        max_attempts = max(300, self.pop_size * 40)
+        while len(assignments) < target_unique and attempts < max_attempts:
+            attempts += 1
+            if assignments and random.random() < 0.45:
+                candidate = list(assignments[int(random.random() * len(assignments))])
+                task_idx = int(random.random() * task_count)
+                nodes = [
+                    node_idx
+                    for node_idx in context.candidate_nodes[task_idx]
+                    if node_idx != candidate[task_idx]
+                ]
+                if not nodes:
+                    continue
+                candidate[task_idx] = nodes[int(random.random() * len(nodes))]
+            else:
+                candidate = [
+                    context.candidate_nodes[task_idx][
+                        int(random.random() * len(context.candidate_nodes[task_idx]))
+                    ]
+                    for task_idx in range(task_count)
+                ]
+            repair = self._repair_assignment_result(dnn_index, candidate, context)
+            if repair.success:
+                add_assignment(repair.assignment)
+
+        if not assignments:
+            return False
+        while len(assignments) < self.pop_size:
+            assignments.append(list(assignments[int(random.random() * len(assignments))]))
+
+        random.shuffle(assignments)
+        for individual_idx, assignment in enumerate(assignments[: self.pop_size]):
             for task_idx, node_idx in enumerate(assignment):
                 self.res[individual_idx][dnn_index][task_idx] = node_idx
+        self.population_roles = [
+            self.customized_membrane_roles[
+                individual_idx % len(self.customized_membrane_roles)
+            ]
+            for individual_idx in range(self.pop_size)
+        ]
+        self.operator_stats["initial_unique_count"] = len(seen)
+        self.operator_stats["initial_duplicate_count"] = self.pop_size - len(seen)
+        self.operator_stats["initialization_retry_count"] = attempts
+        return True
+
+    def _initialize_random_customized_population(self, dnn_index: int, context: DNNContext) -> bool:
+        """不使用 DAG 启发式时的随机可行初始化。"""
+        task_count = len(self.env.ds[dnn_index].tasks)
+        seen: Set[tuple[int, ...]] = set()
+        for individual_idx in range(self.pop_size):
+            for _ in range(300):
+                assignment = [
+                    context.candidate_nodes[task_idx][
+                        int(random.random() * len(context.candidate_nodes[task_idx]))
+                    ]
+                    for task_idx in range(task_count)
+                ]
+                repair = self._repair_assignment_result(dnn_index, assignment, context)
+                key = tuple(repair.assignment)
+                if repair.success and (key not in seen or len(seen) >= math.ceil(self.pop_size * 0.75)):
+                    seen.add(key)
+                    for task_idx, node_idx in enumerate(repair.assignment):
+                        self.res[individual_idx][dnn_index][task_idx] = node_idx
+                    break
+            else:
+                return False
+        self.operator_stats["initial_unique_count"] = len(seen)
+        self.operator_stats["initial_duplicate_count"] = self.pop_size - len(seen)
+        self.population_roles = [
+            self.customized_membrane_roles[
+                individual_idx % len(self.customized_membrane_roles)
+            ]
+            for individual_idx in range(self.pop_size)
+        ]
         return True
 
     def _mutate_assignment(self, dnn_index: int, assignment: List[int]) -> List[int]:
@@ -572,17 +1049,16 @@ class AllDNNRefactor:
         for x in range(task_count):
             self.res_pq[target_index][dnn_index][x] = child[x]
 
-    def _membrane_range(self, role_index: int) -> tuple[int, int]:
-        """返回指定子膜在父代种群中的连续索引范围。"""
-        role_count = len(self.customized_membrane_roles)
-        start = role_index * self.pop_size // role_count
-        end = (role_index + 1) * self.pop_size // role_count
-        return start, max(start + 1, end)
-
     def _pick_parent_from_membrane(self, role_index: int) -> int:
         """从指定子膜中选择一个父代个体。"""
-        start, end = self._membrane_range(role_index)
-        return start + int(random.random() * (end - start))
+        role = self.customized_membrane_roles[role_index]
+        candidates = [
+            idx for idx, current_role in enumerate(self.population_roles)
+            if current_role == role
+        ]
+        if not candidates:
+            return int(random.random() * self.pop_size)
+        return candidates[int(random.random() * len(candidates))]
 
     def _constraint_violation(
         self,
@@ -666,15 +1142,19 @@ class AllDNNRefactor:
             return False
         if not feasible_i and not feasible_j:
             return cv_i < cv_j
-        return (
-            self.function1_values[i] >= self.function1_values[j]
-            and self.function2_values[i] >= self.function2_values[j]
-            and self.function3_values[i] >= self.function3_values[j]
-            and (
-                self.function1_values[i] != self.function1_values[j]
-                or self.function2_values[i] != self.function2_values[j]
-                or self.function3_values[i] != self.function3_values[j]
-            )
+        return self._dominates_objectives(
+            (
+                self.function1_values[i],
+                self.function2_values[i],
+                self.function3_values[i],
+                self.function4_values[i],
+            ),
+            (
+                self.function1_values[j],
+                self.function2_values[j],
+                self.function3_values[j],
+                self.function4_values[j],
+            ),
         )
 
     def dominated_sort_with_cv(self, o: int, population_size: int, epsilon: float) -> None:
@@ -720,19 +1200,46 @@ class AllDNNRefactor:
         rank: List[List[int]],
         dis: List[List[int]],
         i: int,
+        epsilon: float,
     ) -> None:
-        """根据 Pareto 层、CV 和拥挤距离更新 customized 下一代种群。"""
-        selected = sorted(
-            range(len(pq)),
-            key=lambda idx: (
+        """ε 可行解按拥挤距离选择，ε 不可行解再按违反度选择。"""
+        def selection_key(idx: int) -> tuple[float, ...]:
+            return (
                 rank[i][idx],
-                self.constraint_violations[idx],
+                0 if self.constraint_violations[idx] <= epsilon else 1,
+                0.0 if self.constraint_violations[idx] <= epsilon else self.constraint_violations[idx],
                 -dis[i][idx],
-            ),
-        )[: self.pop_size]
+            )
+
+        ordered = sorted(range(len(pq)), key=selection_key)
+        joint_roles = (
+            self._joint_population_roles
+            if len(self._joint_population_roles) == len(pq)
+            else [
+                self.customized_membrane_roles[
+                    idx % len(self.customized_membrane_roles)
+                ]
+                for idx in range(len(pq))
+            ]
+        )
+        selected: List[int] = []
+        base_quota = self.pop_size // len(self.customized_membrane_roles)
+        remainder = self.pop_size % len(self.customized_membrane_roles)
+        for role_index, role in enumerate(self.customized_membrane_roles):
+            quota = base_quota + (1 if role_index < remainder else 0)
+            role_candidates = [idx for idx in ordered if joint_roles[idx] == role]
+            selected.extend(role_candidates[:quota])
+        if len(selected) < self.pop_size:
+            selected_set = set(selected)
+            selected.extend(
+                idx for idx in ordered
+                if idx not in selected_set
+            )
+        selected = selected[: self.pop_size]
         for target_idx, source_idx in enumerate(selected):
             for task_idx in range(len(pq[source_idx][i])):
                 self.res[target_idx][i][task_idx] = pq[source_idx][i][task_idx]
+        self.population_roles = [joint_roles[source_idx] for source_idx in selected]
 
     def _local_search_score(
         self,
@@ -742,39 +1249,14 @@ class AllDNNRefactor:
         w_r: float,
         w_t: float,
         w_e: float,
-        min_a: float,
-        max_a: float,
-        min_r: float,
-        max_r: float,
-        min_t: float,
-        max_t: float,
-        min_e: float,
-        max_e: float,
-    ) -> tuple[float, float, float, float, float, float]:
+    ) -> tuple[ObjectiveValues, float]:
         """返回局部搜索使用的目标值、时延和综合得分。"""
-        value1, value2, value3, value4, delay = self._evaluate_customized_assignment(dnn_index, assignment)
-        if value3 <= 0:
+        values = self._evaluate_customized_assignment(dnn_index, assignment)
+        if not values.deadline_feasible:
             score = -math.inf
         else:
-            score = self._score(
-                value1,
-                value2,
-                value3,
-                value4,
-                w_a,
-                w_r,
-                w_t,
-                w_e,
-                min_a,
-                max_a,
-                min_r,
-                max_r,
-                min_t,
-                max_t,
-                min_e,
-                max_e,
-            )
-        return value1, value2, value3, value4, delay, score
+            score = self._score(*values.vector, w_a, w_r, w_t, w_e)
+        return values, score
 
     def _local_search_elites(
         self,
@@ -784,14 +1266,6 @@ class AllDNNRefactor:
         w_r: float,
         w_t: float,
         w_e: float,
-        min_a: float,
-        max_a: float,
-        min_r: float,
-        max_r: float,
-        min_t: float,
-        max_t: float,
-        min_e: float,
-        max_e: float,
     ) -> int:
         """对少量精英个体执行关键路径邻域搜索。"""
         elite_count = max(1, int(self.pop_size * self.local_search_elite_ratio))
@@ -805,24 +1279,22 @@ class AllDNNRefactor:
                 w_r,
                 w_t,
                 w_e,
-                min_a,
-                max_a,
-                min_r,
-                max_r,
-                min_t,
-                max_t,
-                min_e,
-                max_e,
             )
-            cv = self._constraint_violation(dnn_index, assignment, context, values[4])
-            scored.append((cv, -values[5], idx, values))
+            objectives, score = values
+            cv = self._constraint_violation(dnn_index, assignment, context, objectives.estimated_delay)
+            scored.append((cv, -score, idx, values))
         improved = 0
         task_order = list(context.critical_path_tasks) or list(range(len(self.env.ds[dnn_index].tasks)))
         for _, _, individual_idx, base_values in sorted(scored)[:elite_count]:
             assignment = self._assignment_slice(dnn_index, self.res[individual_idx][dnn_index])
             best_assignment = list(assignment)
-            best_values = base_values
-            best_cv = self._constraint_violation(dnn_index, best_assignment, context, best_values[4])
+            best_objectives, best_score = base_values
+            best_cv = self._constraint_violation(
+                dnn_index,
+                best_assignment,
+                context,
+                best_objectives.estimated_delay,
+            )
             for task_idx in task_order:
                 ranked_candidates = sorted(
                     context.candidate_nodes[task_idx],
@@ -849,51 +1321,35 @@ class AllDNNRefactor:
                         w_r,
                         w_t,
                         w_e,
-                        min_a,
-                        max_a,
-                        min_r,
-                        max_r,
-                        min_t,
-                        max_t,
-                        min_e,
-                        max_e,
                     )
-                    candidate_cv = self._constraint_violation(dnn_index, candidate, context, candidate_values[4])
-                    pareto_not_worse = (
-                        candidate_values[0] >= best_values[0]
-                        and candidate_values[1] >= best_values[1]
-                        and candidate_values[2] >= best_values[2]
+                    candidate_objectives, candidate_score = candidate_values
+                    candidate_cv = self._constraint_violation(
+                        dnn_index,
+                        candidate,
+                        context,
+                        candidate_objectives.estimated_delay,
+                    )
+                    pareto_not_worse = all(
+                        candidate_value >= best_value
+                        for candidate_value, best_value in zip(
+                            candidate_objectives.vector,
+                            best_objectives.vector,
+                        )
                     )
                     if (
                         candidate_cv <= best_cv
                         and pareto_not_worse
-                        and candidate_values[5] > best_values[5]
+                        and candidate_score > best_score
                     ):
                         best_assignment = candidate
-                        best_values = candidate_values
+                        best_objectives = candidate_objectives
+                        best_score = candidate_score
                         best_cv = candidate_cv
                         improved += 1
                         break
             for task_idx, node_idx in enumerate(best_assignment):
                 self.res[individual_idx][dnn_index][task_idx] = node_idx
         return improved
-
-    def mutate(self, i: int, m: int) -> None:
-        """对指定个体执行一次随机变异。"""
-        rate = random.random()
-        dnn = self.env.ds[i]
-        xs = self._build_assignment_matrix(i, self.res[m][i])
-        if rate < self.mutate_pm:
-            while True:
-                x = int(random.random() * len(dnn.tasks))
-                y = int(random.random() * len(self.env.nodes))
-                xs[x][self.res[m][i][x]] = 0
-                xs[x][y] = 1
-                if self.env.check_resource(dnn, xs) and (self.env.nodes[y].level != 1 or y == dnn.initiateNode):
-                    self.res[m][i][x] = y
-                    break
-                xs[x][self.res[m][i][x]] = 1
-                xs[x][y] = 0
 
     def cross_over1(self, i: int, m: int, n: int, next_index: int) -> None:
         """执行按后缀交换的交叉操作，并生成两个独立子代。"""
@@ -925,56 +1381,9 @@ class AllDNNRefactor:
         self._write_child(i, child_m, next_index)
         self._write_child(i, child_n, next_index + 1)
 
-
-    def cross_over(self, i: int, m: int, n: int, next_index: int) -> None:
-        """执行按单点交换的交叉操作，并生成两个独立子代。"""
-        dnn = self.env.ds[i]
-        task_count = len(dnn.tasks)
-        parent_m = list(self.res[m][i])
-        parent_n = list(self.res[n][i])
-        child_m = list(parent_m)
-        child_n = list(parent_n)
-        success = False
-        self.start_time = time.monotonic()
-        while True:
-            if (time.monotonic() - self.start_time) * 1000 > 10000:
-                break
-            index_m = int(task_count * random.random())
-            index_n = int(task_count * random.random())
-            child_m = list(parent_m)
-            child_n = list(parent_n)
-            child_m[index_m] = parent_n[index_n]
-            child_n[index_n] = parent_m[index_m]
-            if self._is_assignment_valid(i, child_m) and self._is_assignment_valid(i, child_n):
-                success = True
-                break
-        if not success:
-            child_m = list(parent_m)
-            child_n = list(parent_n)
-        child_m = self._mutate_assignment(i, child_m)
-        child_n = self._mutate_assignment(i, child_n)
-        self._write_child(i, child_m, next_index)
-        self._write_child(i, child_n, next_index + 1)
-
-    def count_values1(self, i: int, m: int) -> None:
-        """计算第一个目标值并写回缓存。"""
-        self.function1_values[m] = self._evaluate_assignment(i, self.res_pq[m][i])[0]
-
-    def count_values2(self, i: int, m: int) -> None:
-        """计算第二个目标值并写回缓存。"""
-        self.function2_values[m] = self._evaluate_assignment(i, self.res_pq[m][i])[1]
-
-    def count_values3(self, i: int, m: int) -> None:
-        """计算第三个目标值并写回缓存。"""
-        self.function3_values[m] = self._evaluate_assignment(i, self.res_pq[m][i])[2]
-
     def count_values(self, i: int, m: int) -> None:
-        """一次性计算三个目标值、能耗收益并写回缓存。"""
-        value1, value2, value3, value4, _ = self._evaluate_assignment(i, self.res_pq[m][i])
-        self.function1_values[m] = value1
-        self.function2_values[m] = value2
-        self.function3_values[m] = value3
-        self.function4_values[m] = value4
+        """一次性计算并写回四个统一满意度目标及其原始指标。"""
+        self._write_objective_values(m, self._evaluate_assignment(i, self.res_pq[m][i]))
 
     def dominated_sort(self, o: int) -> None:
         """对当前种群执行非支配排序。"""
@@ -984,15 +1393,26 @@ class AllDNNRefactor:
         z = [0 for _ in range(2 * self.pop_size)]
         for i in range(len(self.function1_values)):
             for j in range(len(self.function1_values)):
-                if (
-                    self.function1_values[i] >= self.function1_values[j]
-                    and self.function2_values[i] >= self.function2_values[j]
-                    and self.function3_values[i] >= self.function3_values[j]
-                    and (
-                        self.function1_values[i] != self.function1_values[j]
-                        or self.function2_values[i] != self.function2_values[j]
-                        or self.function3_values[i] != self.function3_values[j]
-                    )
+                if i == j:
+                    continue
+                if self.deadline_feasible_values[i] and not self.deadline_feasible_values[j]:
+                    x[i][j] = 1
+                elif not self.deadline_feasible_values[i] and not self.deadline_feasible_values[j]:
+                    if self.estimated_delay_values[i] < self.estimated_delay_values[j]:
+                        x[i][j] = 1
+                elif self.deadline_feasible_values[i] and self._dominates_objectives(
+                    (
+                        self.function1_values[i],
+                        self.function2_values[i],
+                        self.function3_values[i],
+                        self.function4_values[i],
+                    ),
+                    (
+                        self.function1_values[j],
+                        self.function2_values[j],
+                        self.function3_values[j],
+                        self.function4_values[j],
+                    ),
                 ):
                     x[i][j] = 1
         while y < 2 * self.pop_size:
@@ -1013,7 +1433,15 @@ class AllDNNRefactor:
                         x[i][j] = 0
             rank += 1
 
-    def get_res(self, i: int, pq: List[List[List[int]]], values1: List[float], values2: List[float], values3: List[float]) -> List[List[int]]:
+    def get_res(
+        self,
+        i: int,
+        pq: List[List[List[int]]],
+        values1: List[float],
+        values2: List[float],
+        values3: List[float],
+        values4: List[float],
+    ) -> List[List[int]]:
         """按 Pareto 层分别计算联合种群的拥挤距离。"""
         inf = 2**31 - 1
         population_size = len(pq)
@@ -1028,7 +1456,7 @@ class AllDNNRefactor:
             rank = self.pareto_level_sort[i][m]
             fronts.setdefault(rank, []).append(m)
 
-        objectives = (values1, values2, values3)
+        objectives = (values1, values2, values3, values4)
         for front in fronts.values():
             if not front:
                 continue
@@ -1085,7 +1513,10 @@ class AllDNNRefactor:
                     post = -1
                     for m in range(len(rank[i])):
                         if rank[i][m] == level and has[m] == 0:
-                            if post == -1 or (self.function3_values[m] > 0 and self.function3_values[post] < 0):
+                            if post == -1 or (
+                                self.deadline_feasible_values[m]
+                                and not self.deadline_feasible_values[post]
+                            ):
                                 post = m
                             elif dis[i][m] > dis[i][post]:
                                 post = m
@@ -1105,35 +1536,55 @@ class AllDNNRefactor:
         w_r: float,
         w_t: float,
         w_e: float,
-        min_a: float,
-        max_a: float,
-        min_r: float,
-        max_r: float,
-        min_t: float,
-        max_t: float,
-        min_e: float,
-        max_e: float,
     ) -> float:
-        """对满足时延的候选解做归一化加权打分，并纳入能耗收益。"""
+        """对统一满意度向量加权。"""
         return (
-            w_a * _java_div(value1 - min_a, max_a - min_a)
-            + w_r * _java_div(value2 - min_r, max_r - min_r)
-            + w_t * _java_div(max_t - _java_div(1, value3), max_t - min_t)
-            + w_e * _java_div(value4 - min_e, max_e - min_e)
+            w_a * self._clamp_satisfaction(value1)
+            + w_r * self._clamp_satisfaction(value2)
+            + w_t * self._clamp_satisfaction(value3)
+            + w_e * self._clamp_satisfaction(value4)
+        )
+
+    def _best_strict_feasible_index(
+        self,
+        population_size: int,
+        weights: tuple[float, float, float, float],
+        tolerance: float = 1e-12,
+    ) -> int | None:
+        """从已评价种群中选择严格可行的偏好最优解。"""
+        w_a, w_r, w_t, w_e = weights
+        candidates = [
+            idx
+            for idx in range(population_size)
+            if self.deadline_feasible_values[idx]
+            and self.constraint_violations[idx] <= tolerance
+        ]
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda idx: self._score(
+                self.function1_values[idx],
+                self.function2_values[idx],
+                self.function3_values[idx],
+                self.function4_values[idx],
+                w_a,
+                w_r,
+                w_t,
+                w_e,
+            ),
         )
 
     def run_proposed(self) -> ExperimentMetrics:
         """运行主算法并输出平均指标。"""
+        self.pareto_points = []
         max_a = 1.0
         max_r = 1.0
         max_t = 2000.0
-        max_e = 1.0
         min_a = 0.0
         min_r = 0.0
         min_t = 200.0
-        min_e = 0.0
         self.res = self._new_population(self.pop_size)
-        self.res_next = self._new_population(self.pop_size)
         t_res = 0.0
         r_res = 0.0
         a_res = 0.0
@@ -1163,27 +1614,23 @@ class AllDNNRefactor:
             best_value = [0.0, 0.0, -1.0, 0.0]
             best_assignment = [0 for _ in range(self.max_dnn_num)]
             self.res = self._new_population(self.pop_size)
-            self.res_next = self._new_population(self.pop_size)
             self.function1_values = [0.0 for _ in range(2 * self.pop_size)]
             self.function2_values = [0.0 for _ in range(2 * self.pop_size)]
             self.function3_values = [0.0 for _ in range(2 * self.pop_size)]
             self.function4_values = [0.0 for _ in range(2 * self.pop_size)]
+            self.estimated_delay_values = [math.inf for _ in range(2 * self.pop_size)]
+            self.total_energy_values = [math.inf for _ in range(2 * self.pop_size)]
+            self.deadline_feasible_values = [False for _ in range(2 * self.pop_size)]
             self.constraint_violations = [0.0 for _ in range(2 * self.pop_size)]
-            raw_w_t = _java_div(max_t - self.env.ds[t].delay, max_t - min_t)
-            raw_w_a = _java_div(self.env.ds[t].preA - min_a, max_a - min_a)
-            raw_w_r = _java_div(self.env.ds[t].preR - min_r, max_r - min_r)
-            w_e = 0.2
-            remaining_weight = 1.0 - w_e
-            base_weight_sum = raw_w_t + raw_w_a + raw_w_r
-            if base_weight_sum > 0:
-                scale = remaining_weight / base_weight_sum
-                w_t = raw_w_t * scale
-                w_a = raw_w_a * scale
-                w_r = raw_w_r * scale
-            else:
-                w_t = remaining_weight / 3
-                w_a = remaining_weight / 3
-                w_r = remaining_weight / 3
+            w_a, w_r, w_t, w_e = self._resolve_preference_weights(
+                t,
+                min_a,
+                max_a,
+                min_r,
+                max_r,
+                min_t,
+                max_t,
+            )
             o = 0
             index = 0
             best_gen = 0
@@ -1280,17 +1727,17 @@ class AllDNNRefactor:
                     self.count_values(t, m)
                 bi = 0
                 for i in range(2 * self.pop_size):
-                    if self.function3_values[i] > 0 and self.function3_values[bi] < 0:
+                    if self.deadline_feasible_values[i] and not self.deadline_feasible_values[bi]:
                         bi = i
-                    elif self.function3_values[i] > 0:
-                        if self.function3_values[bi] < 0 or self._score(self.function1_values[i], self.function2_values[i], self.function3_values[i], self.function4_values[i], w_a, w_r, w_t, w_e, min_a, max_a, min_r, max_r, min_t, max_t, min_e, max_e) > self._score(self.function1_values[bi], self.function2_values[bi], self.function3_values[bi], self.function4_values[bi], w_a, w_r, w_t, w_e, min_a, max_a, min_r, max_r, min_t, max_t, min_e, max_e):
+                    elif self.deadline_feasible_values[i]:
+                        if not self.deadline_feasible_values[bi] or self._score(self.function1_values[i], self.function2_values[i], self.function3_values[i], self.function4_values[i], w_a, w_r, w_t, w_e) > self._score(self.function1_values[bi], self.function2_values[bi], self.function3_values[bi], self.function4_values[bi], w_a, w_r, w_t, w_e):
                             bi = i
                 if (
-                    (best_value[2] < 0 and self.function3_values[bi] > 0)
+                    (best_value[2] < 0 and self.deadline_feasible_values[bi])
                     or (
-                        self.function3_values[bi] > 0
-                        and self._score(best_value[0], best_value[1], best_value[2], best_value[3], w_a, w_r, w_t, w_e, min_a, max_a, min_r, max_r, min_t, max_t, min_e, max_e)
-                        < self._score(self.function1_values[bi], self.function2_values[bi], self.function3_values[bi], self.function4_values[bi], w_a, w_r, w_t, w_e, min_a, max_a, min_r, max_r, min_t, max_t, min_e, max_e)
+                        self.deadline_feasible_values[bi]
+                        and self._score(best_value[0], best_value[1], best_value[2], best_value[3], w_a, w_r, w_t, w_e)
+                        < self._score(self.function1_values[bi], self.function2_values[bi], self.function3_values[bi], self.function4_values[bi], w_a, w_r, w_t, w_e)
                     )
                 ):
                     for j in range(len(self.env.ds[t].tasks)):
@@ -1312,7 +1759,14 @@ class AllDNNRefactor:
                 # 阶段四：通过非支配排序和拥挤距离更新下一代父代。
                 # 使用非支配排序和拥挤距离从 P+Q 中筛出下一代父代。
                 self.dominated_sort(t)
-                self.get_res(t, self.res_pq, self.function1_values, self.function2_values, self.function3_values)
+                self.get_res(
+                    t,
+                    self.res_pq,
+                    self.function1_values,
+                    self.function2_values,
+                    self.function3_values,
+                    self.function4_values,
+                )
                 self.update_res(self.res_pq, self.pareto_level_sort, self.distance, t)
                 index += 1
             if o == 1:
@@ -1328,19 +1782,20 @@ class AllDNNRefactor:
             self.res_pq = self.res
             for m in range(len(self.res_pq)):
                 self.count_values(t, m)
+            self._append_current_pareto_points("proposed", t, len(self.res_pq))
             best_i = 0
             for i in range(self.pop_size):
-                if self.function3_values[i] > 0 and self.function3_values[best_i] < 0:
+                if self.deadline_feasible_values[i] and not self.deadline_feasible_values[best_i]:
                     best_i = i
-                elif self.function3_values[i] > 0:
-                    if self.function3_values[best_i] < 0 or self._score(self.function1_values[i], self.function2_values[i], self.function3_values[i], self.function4_values[i], w_a, w_r, w_t, w_e, min_a, max_a, min_r, max_r, min_t, max_t, min_e, max_e) > self._score(self.function1_values[best_i], self.function2_values[best_i], self.function3_values[best_i], self.function4_values[best_i], w_a, w_r, w_t, w_e, min_a, max_a, min_r, max_r, min_t, max_t, min_e, max_e):
+                elif self.deadline_feasible_values[i]:
+                    if not self.deadline_feasible_values[best_i] or self._score(self.function1_values[i], self.function2_values[i], self.function3_values[i], self.function4_values[i], w_a, w_r, w_t, w_e) > self._score(self.function1_values[best_i], self.function2_values[best_i], self.function3_values[best_i], self.function4_values[best_i], w_a, w_r, w_t, w_e):
                         best_i = i
             if (
-                (best_value[2] < 0 and self.function3_values[best_i] > 0)
+                (best_value[2] < 0 and self.deadline_feasible_values[best_i])
                 or (
-                    self.function3_values[best_i] > 0
-                    and self._score(best_value[0], best_value[1], best_value[2], best_value[3], w_a, w_r, w_t, w_e, min_a, max_a, min_r, max_r, min_t, max_t, min_e, max_e)
-                    < self._score(self.function1_values[best_i], self.function2_values[best_i], self.function3_values[best_i], self.function4_values[best_i], w_a, w_r, w_t, w_e, min_a, max_a, min_r, max_r, min_t, max_t, min_e, max_e)
+                    self.deadline_feasible_values[best_i]
+                    and self._score(best_value[0], best_value[1], best_value[2], best_value[3], w_a, w_r, w_t, w_e)
+                    < self._score(self.function1_values[best_i], self.function2_values[best_i], self.function3_values[best_i], self.function4_values[best_i], w_a, w_r, w_t, w_e)
                 )
             ):
                 for j in range(len(self.env.ds[t].tasks)):
@@ -1370,8 +1825,9 @@ class AllDNNRefactor:
             # 阶段六：接纳最优解并把 DNN 注册为运行块。
             # 接纳成功后先把 DNN 放入运行集合，
             # 下一个时隙再统一更新负载、热度和动态可靠性。
-            _, _, _, _, delay = self._evaluate_assignment(t, best_assignment)
-            total_energy = self.env.count_total_energy_by_assignment(t, self._assignment_slice(t, best_assignment))
+            selected_values = self._evaluate_assignment(t, best_assignment)
+            delay = selected_values.estimated_delay
+            total_energy = selected_values.total_energy
             self._log_proposed_stage(
                 t,
                 "accepted",
@@ -1381,8 +1837,8 @@ class AllDNNRefactor:
             )
             self._register_running_dnn(t, best_assignment, delay)
             t_res += delay
-            r_res += best_value[1]
-            a_res += best_value[0]
+            r_res += selected_values.operational_stability
+            a_res += selected_values.inference_fidelity
             e_res += total_energy
             success_dnn += 1
             next_dnn_index += 1
@@ -1391,8 +1847,8 @@ class AllDNNRefactor:
         denominator = success_dnn
         return ExperimentMetrics(
             avg_delay=t_res / denominator if denominator else 0.0,
-            avg_operation=r_res / denominator if denominator else 0.0,
-            avg_accuracy=a_res / denominator if denominator else 0.0,
+            avg_operational_stability_score=r_res / denominator if denominator else 0.0,
+            avg_inference_fidelity_score=a_res / denominator if denominator else 0.0,
             avg_energy=e_res / denominator if denominator else 0.0,
             failure_count=failure_dnn,
             runtime_ms=int((time.monotonic() - run_time) * 1000),
@@ -1400,16 +1856,14 @@ class AllDNNRefactor:
 
     def run_customized_proposed(self) -> ExperimentMetrics:
         """运行面向 DNN 拓扑与边缘网络状态定制的 RDODA-DSSA。"""
+        self.pareto_points = []
         max_a = 1.0
         max_r = 1.0
         max_t = 2000.0
-        max_e = 1.0
         min_a = 0.0
         min_r = 0.0
         min_t = 200.0
-        min_e = 0.0
         self.res = self._new_population(self.pop_size)
-        self.res_next = self._new_population(self.pop_size)
         t_res = 0.0
         r_res = 0.0
         a_res = 0.0
@@ -1438,27 +1892,24 @@ class AllDNNRefactor:
             best_value = [0.0, 0.0, -1.0, 0.0]
             best_assignment = [0 for _ in range(self.max_dnn_num)]
             self.res = self._new_population(self.pop_size)
-            self.res_next = self._new_population(self.pop_size)
             self.function1_values = [0.0 for _ in range(2 * self.pop_size)]
             self.function2_values = [0.0 for _ in range(2 * self.pop_size)]
             self.function3_values = [0.0 for _ in range(2 * self.pop_size)]
             self.function4_values = [0.0 for _ in range(2 * self.pop_size)]
-            raw_w_t = _java_div(max_t - self.env.ds[t].delay, max_t - min_t)
-            raw_w_a = _java_div(self.env.ds[t].preA - min_a, max_a - min_a)
-            raw_w_r = _java_div(self.env.ds[t].preR - min_r, max_r - min_r)
-            w_e = 0.2
-            remaining_weight = 1.0 - w_e
-            base_weight_sum = raw_w_t + raw_w_a + raw_w_r
-            if base_weight_sum > 0:
-                scale = remaining_weight / base_weight_sum
-                w_t = raw_w_t * scale
-                w_a = raw_w_a * scale
-                w_r = raw_w_r * scale
-            else:
-                w_t = remaining_weight / 3
-                w_a = remaining_weight / 3
-                w_r = remaining_weight / 3
-
+            self.estimated_delay_values = [math.inf for _ in range(2 * self.pop_size)]
+            self.total_energy_values = [math.inf for _ in range(2 * self.pop_size)]
+            self.deadline_feasible_values = [False for _ in range(2 * self.pop_size)]
+            self.constraint_violations = [0.0 for _ in range(2 * self.pop_size)]
+            w_a, w_r, w_t, w_e = self._resolve_preference_weights(
+                t,
+                min_a,
+                max_a,
+                min_r,
+                max_r,
+                min_t,
+                max_t,
+            )
+            preference_weights = (w_a, w_r, w_t, w_e)
             search_failed = False
             index = 0
             best_gen = 0
@@ -1478,6 +1929,10 @@ class AllDNNRefactor:
                     for m1 in range(len(self.res[m])):
                         for m2 in range(len(self.res[m][m1])):
                             self.res_pq[m][m1][m2] = self.res[m][m1][m2]
+                self._joint_population_roles = [
+                    *self.population_roles,
+                    *["balanced" for _ in range(self.pop_size)],
+                ]
                 for m in range(0, self.pop_size, 2):
                     role_index = (m // 2) % len(self.customized_membrane_roles)
                     role = self.customized_membrane_roles[role_index]
@@ -1487,6 +1942,9 @@ class AllDNNRefactor:
                     else:
                         b1 = self._pick_parent_from_membrane(role_index)
                     self._write_customized_child(t, a1, b1, self.pop_size + m, context, role)
+                    self._joint_population_roles[self.pop_size + m] = role
+                    if self.pop_size + m + 1 < len(self._joint_population_roles):
+                        self._joint_population_roles[self.pop_size + m + 1] = role
 
                 for m in range(len(self.res_pq)):
                     delay = self._count_customized_values(t, m)
@@ -1496,87 +1954,25 @@ class AllDNNRefactor:
                         context,
                         delay,
                     )
-                bi = 0
-                for i in range(2 * self.pop_size):
-                    if self.function3_values[i] > 0 and self.function3_values[bi] < 0:
-                        bi = i
-                    elif self.function3_values[i] > 0:
-                        if self.function3_values[bi] < 0 or self._score(
-                            self.function1_values[i],
-                            self.function2_values[i],
-                            self.function3_values[i],
-                            self.function4_values[i],
-                            w_a,
-                            w_r,
-                            w_t,
-                            w_e,
-                            min_a,
-                            max_a,
-                            min_r,
-                            max_r,
-                            min_t,
-                            max_t,
-                            min_e,
-                            max_e,
-                        ) > self._score(
-                            self.function1_values[bi],
-                            self.function2_values[bi],
-                            self.function3_values[bi],
-                            self.function4_values[bi],
-                            w_a,
-                            w_r,
-                            w_t,
-                            w_e,
-                            min_a,
-                            max_a,
-                            min_r,
-                            max_r,
-                            min_t,
-                            max_t,
-                            min_e,
-                            max_e,
-                        ):
-                            bi = i
-                if (
-                    (best_value[2] < 0 and self.function3_values[bi] > 0)
-                    or (
-                        self.function3_values[bi] > 0
-                        and self._score(
-                            best_value[0],
-                            best_value[1],
-                            best_value[2],
-                            best_value[3],
-                            w_a,
-                            w_r,
-                            w_t,
-                            w_e,
-                            min_a,
-                            max_a,
-                            min_r,
-                            max_r,
-                            min_t,
-                            max_t,
-                            min_e,
-                            max_e,
-                        )
-                        < self._score(
-                            self.function1_values[bi],
-                            self.function2_values[bi],
-                            self.function3_values[bi],
-                            self.function4_values[bi],
-                            w_a,
-                            w_r,
-                            w_t,
-                            w_e,
-                            min_a,
-                            max_a,
-                            min_r,
-                            max_r,
-                            min_t,
-                            max_t,
-                            min_e,
-                            max_e,
-                        )
+                bi = self._best_strict_feasible_index(
+                    2 * self.pop_size,
+                    preference_weights,
+                )
+                if bi is not None and (
+                    best_value[2] < 0
+                    or self._score(
+                        best_value[0],
+                        best_value[1],
+                        best_value[2],
+                        best_value[3],
+                        *preference_weights,
+                    )
+                    < self._score(
+                        self.function1_values[bi],
+                        self.function2_values[bi],
+                        self.function3_values[bi],
+                        self.function4_values[bi],
+                        *preference_weights,
                     )
                 ):
                     for j in range(len(self.env.ds[t].tasks)):
@@ -1598,24 +1994,32 @@ class AllDNNRefactor:
 
                 epsilon = self._customized_epsilon(index)
                 self.dominated_sort_with_cv(t, len(self.res_pq), epsilon)
-                self.get_res(t, self.res_pq, self.function1_values, self.function2_values, self.function3_values)
-                self.update_res_with_cv(self.res_pq, self.pareto_level_sort, self.distance, t)
-                local_improvements = self._local_search_elites(
+                self.get_res(
                     t,
-                    context,
-                    w_a,
-                    w_r,
-                    w_t,
-                    w_e,
-                    min_a,
-                    max_a,
-                    min_r,
-                    max_r,
-                    min_t,
-                    max_t,
-                    min_e,
-                    max_e,
+                    self.res_pq,
+                    self.function1_values,
+                    self.function2_values,
+                    self.function3_values,
+                    self.function4_values,
                 )
+                self.update_res_with_cv(
+                    self.res_pq,
+                    self.pareto_level_sort,
+                    self.distance,
+                    t,
+                    epsilon,
+                )
+                if self.use_elite_local_search:
+                    local_improvements = self._local_search_elites(
+                        t,
+                        context,
+                        w_a,
+                        w_r,
+                        w_t,
+                        w_e,
+                    )
+                else:
+                    local_improvements = 0
                 if local_improvements and (index == 0 or index % 10 == 0):
                     self._log_proposed_stage(
                         t,
@@ -1635,88 +2039,33 @@ class AllDNNRefactor:
             self.res_pq = self._new_population(self.pop_size)
             self.res_pq = self.res
             for m in range(len(self.res_pq)):
-                self._count_customized_values(t, m)
-            best_i = 0
-            for i in range(self.pop_size):
-                if self.function3_values[i] > 0 and self.function3_values[best_i] < 0:
-                    best_i = i
-                elif self.function3_values[i] > 0:
-                    if self.function3_values[best_i] < 0 or self._score(
-                        self.function1_values[i],
-                        self.function2_values[i],
-                        self.function3_values[i],
-                        self.function4_values[i],
-                        w_a,
-                        w_r,
-                        w_t,
-                        w_e,
-                        min_a,
-                        max_a,
-                        min_r,
-                        max_r,
-                        min_t,
-                        max_t,
-                        min_e,
-                        max_e,
-                    ) > self._score(
-                        self.function1_values[best_i],
-                        self.function2_values[best_i],
-                        self.function3_values[best_i],
-                        self.function4_values[best_i],
-                        w_a,
-                        w_r,
-                        w_t,
-                        w_e,
-                        min_a,
-                        max_a,
-                        min_r,
-                        max_r,
-                        min_t,
-                        max_t,
-                        min_e,
-                        max_e,
-                    ):
-                        best_i = i
-            if (
-                (best_value[2] < 0 and self.function3_values[best_i] > 0)
-                or (
-                    self.function3_values[best_i] > 0
-                    and self._score(
-                        best_value[0],
-                        best_value[1],
-                        best_value[2],
-                        best_value[3],
-                        w_a,
-                        w_r,
-                        w_t,
-                        w_e,
-                        min_a,
-                        max_a,
-                        min_r,
-                        max_r,
-                        min_t,
-                        max_t,
-                        min_e,
-                        max_e,
-                    )
-                    < self._score(
-                        self.function1_values[best_i],
-                        self.function2_values[best_i],
-                        self.function3_values[best_i],
-                        self.function4_values[best_i],
-                        w_a,
-                        w_r,
-                        w_t,
-                        w_e,
-                        min_a,
-                        max_a,
-                        min_r,
-                        max_r,
-                        min_t,
-                        max_t,
-                        min_e,
-                        max_e,
-                    )
+                delay = self._count_customized_values(t, m)
+                self.constraint_violations[m] = self._constraint_violation(
+                    t,
+                    self.res_pq[m][t],
+                    context,
+                    delay,
+                )
+            self._append_current_pareto_points("customized", t, len(self.res_pq))
+            best_i = self._best_strict_feasible_index(
+                self.pop_size,
+                preference_weights,
+            )
+            if best_i is not None and (
+                best_value[2] < 0
+                or self._score(
+                    best_value[0],
+                    best_value[1],
+                    best_value[2],
+                    best_value[3],
+                    *preference_weights,
+                )
+                < self._score(
+                    self.function1_values[best_i],
+                    self.function2_values[best_i],
+                    self.function3_values[best_i],
+                    self.function4_values[best_i],
+                    *preference_weights,
                 )
             ):
                 for j in range(len(self.env.ds[t].tasks)):
@@ -1736,13 +2085,28 @@ class AllDNNRefactor:
                 value4=f"{best_value[3]:.6f}",
             )
             if best_value[2] < 0:
-                self._log_proposed_stage(t, "customized_rejected", reason="deadline_or_score")
+                self._log_proposed_stage(t, "customized_rejected", reason="no_strictly_feasible_solution")
                 failure_dnn += 1
                 next_dnn_index += 1
                 self.env.advance_time_slot()
                 continue
-            _, _, _, _, delay = self._evaluate_customized_assignment(t, best_assignment)
-            total_energy = self.env.count_total_energy_by_assignment(t, self._assignment_slice(t, best_assignment))
+            selected_values = self._evaluate_customized_assignment(t, best_assignment)
+            delay = selected_values.estimated_delay
+            assignment_slice = self._assignment_slice(t, best_assignment)
+            self._constraint_violation_cache.pop((t, tuple(assignment_slice)), None)
+            final_cv = self._constraint_violation(t, assignment_slice, context, delay)
+            if final_cv > 1e-12:
+                self._log_proposed_stage(
+                    t,
+                    "customized_rejected",
+                    reason="final_constraint_violation",
+                    cv=f"{final_cv:.6g}",
+                )
+                failure_dnn += 1
+                next_dnn_index += 1
+                self.env.advance_time_slot()
+                continue
+            total_energy = selected_values.total_energy
             self._log_proposed_stage(
                 t,
                 "customized_accepted",
@@ -1752,8 +2116,8 @@ class AllDNNRefactor:
             )
             self._register_running_dnn(t, best_assignment, delay)
             t_res += delay
-            r_res += best_value[1]
-            a_res += best_value[0]
+            r_res += selected_values.operational_stability
+            a_res += selected_values.inference_fidelity
             e_res += total_energy
             success_dnn += 1
             next_dnn_index += 1
@@ -1762,22 +2126,31 @@ class AllDNNRefactor:
         denominator = success_dnn
         return ExperimentMetrics(
             avg_delay=t_res / denominator if denominator else 0.0,
-            avg_operation=r_res / denominator if denominator else 0.0,
-            avg_accuracy=a_res / denominator if denominator else 0.0,
+            avg_operational_stability_score=r_res / denominator if denominator else 0.0,
+            avg_inference_fidelity_score=a_res / denominator if denominator else 0.0,
             avg_energy=e_res / denominator if denominator else 0.0,
             failure_count=failure_dnn,
             runtime_ms=int((time.monotonic() - run_time) * 1000),
         )
+
+    def _check_max_resource_assignment(self, r: List[int], dnn: DNN) -> bool:
+        """检查 maxresource 完整部署向量的时延并缓存结果。"""
+        assignment = tuple(r[: len(dnn.tasks)])
+        delay = self._max_resource_delay_cache.get(assignment)
+        if delay is None:
+            delay = self.env.count_delay_by_assignment(dnn, list(assignment))
+            self._max_resource_delay_cache[assignment] = delay
+        if dnn.delay > delay:
+            self._max_resource_last_delay = delay
+            return True
+        return False
 
     def max_resource_placement1(self, r: List[int], dnn: DNN, i: int, node_list: List[Node]) -> bool:
         """在不优先云节点时递归寻找高资源部署。"""
         if (time.monotonic() - self.start_time) * 1000 > 10000:
             return False
         if i == len(dnn.tasks):
-            xs = [[0 for _ in range(len(node_list))] for _ in range(len(dnn.tasks))]
-            for j in range(len(dnn.tasks)):
-                xs[j][r[j]] = 1
-            return self.env.check_delay_random(dnn, xs) and self.env.check_resource(dnn, xs)
+            return self._check_max_resource_assignment(r, dnn)
         candidates = [idx for idx in range(len(node_list)) if self.env.nodes[idx].level != 3]
         candidates.sort(key=lambda idx: node_list[idx].cpu, reverse=True)
         for index in candidates:
@@ -1796,10 +2169,7 @@ class AllDNNRefactor:
         if (time.monotonic() - self.start_time) * 1000 > 10000:
             return False
         if i == len(dnn.tasks):
-            xs = [[0 for _ in range(len(node_list))] for _ in range(len(dnn.tasks))]
-            for j in range(len(dnn.tasks)):
-                xs[j][r[j]] = 1
-            return self.env.check_delay_random(dnn, xs) and self.env.check_resource(dnn, xs)
+            return self._check_max_resource_assignment(r, dnn)
         candidates = list(range(len(node_list)))
         candidates.sort(key=lambda idx: node_list[idx].cpu, reverse=True)
         for index in candidates:
@@ -1808,6 +2178,78 @@ class AllDNNRefactor:
                 continue
             node_list[index].cpu -= dnn.tasks[i].cpu_need
             if (node_list[index].level != 1 or index == dnn.initiateNode) and self.max_resource_placement(r, dnn, i + 1, node_list):
+                return True
+            node_list[index].cpu += dnn.tasks[i].cpu_need
+            r[i] = 0
+        return False
+
+    def _max_resource_fast_score(self, remaining_cpu: List[float], assignment: List[int]) -> tuple[float, float, int]:
+        """返回 fast beam 使用的资源优先评分。"""
+        used_nodes = len({node_idx for node_idx in assignment if node_idx >= 0})
+        return max(remaining_cpu), sum(remaining_cpu), -used_nodes
+
+    def _max_resource_fast_beam(self, r: List[int], dnn: DNN, node_list: List[Node]) -> bool:
+        """使用 Top-K beam search 快速寻找资源优先部署。"""
+        node_count = len(node_list)
+        task_count = len(dnn.tasks)
+        initial_cpu = [node.cpu for node in node_list]
+        beam: List[tuple[List[int], List[float]]] = [([], initial_cpu)]
+        for task_idx, task in enumerate(dnn.tasks):
+            if (time.monotonic() - self.start_time) * 1000 > self.max_resource_fast_budget_ms:
+                return False
+            next_beam: List[tuple[List[int], List[float]]] = []
+            for assignment, remaining_cpu in beam:
+                candidates = list(range(node_count))
+                candidates.sort(key=lambda idx: remaining_cpu[idx], reverse=True)
+                expanded = 0
+                for node_idx in candidates:
+                    if expanded >= self.max_resource_fast_top_k:
+                        break
+                    if remaining_cpu[node_idx] < task.cpu_need:
+                        continue
+                    if node_list[node_idx].level == 1 and node_idx != dnn.initiateNode:
+                        continue
+                    next_assignment = [*assignment, node_idx]
+                    next_cpu = list(remaining_cpu)
+                    next_cpu[node_idx] -= task.cpu_need
+                    next_beam.append((next_assignment, next_cpu))
+                    expanded += 1
+            if not next_beam:
+                return False
+            next_beam.sort(
+                key=lambda item: self._max_resource_fast_score(item[1], item[0]),
+                reverse=True,
+            )
+            beam = next_beam[: self.max_resource_fast_beam_width]
+        for assignment, _ in beam:
+            for task_idx in range(task_count):
+                r[task_idx] = assignment[task_idx]
+            if self._check_max_resource_assignment(r, dnn):
+                return True
+        return False
+
+    def _max_resource_placement_budget(
+        self,
+        r: List[int],
+        dnn: DNN,
+        i: int,
+        node_list: List[Node],
+    ) -> bool:
+        """在 fast 总预算内按原始候选顺序执行 DFS 兜底。"""
+        if (time.monotonic() - self.start_time) * 1000 > self.max_resource_fast_budget_ms:
+            return False
+        if i == len(dnn.tasks):
+            return self._check_max_resource_assignment(r, dnn)
+        candidates = list(range(len(node_list)))
+        candidates.sort(key=lambda idx: node_list[idx].cpu, reverse=True)
+        for index in candidates:
+            r[i] = index
+            if not (node_list[index].cpu >= dnn.tasks[i].cpu_need):
+                continue
+            if node_list[index].level == 1 and index != dnn.initiateNode:
+                continue
+            node_list[index].cpu -= dnn.tasks[i].cpu_need
+            if self._max_resource_placement_budget(r, dnn, i + 1, node_list):
                 return True
             node_list[index].cpu += dnn.tasks[i].cpu_need
             r[i] = 0
@@ -1882,9 +2324,101 @@ class AllDNNRefactor:
         """转调环境中的局部时延估计函数。"""
         return self.env.count_delay_random1(dnn, x, index1)
 
-    def run_random(self, reset_snapshot: List[Node]) -> ExperimentMetrics:
-        """运行随机部署基线。"""
+    def _random_valid_assignment(self, dnn_index: int, max_attempts: int = 500) -> List[int] | None:
+        """随机生成一个满足资源和节点层级约束的部署向量。"""
+        dnn = self.env.ds[dnn_index]
+        task_count = len(dnn.tasks)
+        candidate_nodes = [
+            [
+                node_idx
+                for node_idx, node in enumerate(self.env.nodes)
+                if node.level != 1 or node_idx == dnn.initiateNode
+            ]
+            for _ in range(task_count)
+        ]
+        for _ in range(max_attempts):
+            assignment = [
+                candidates[int(random.random() * len(candidates))]
+                for candidates in candidate_nodes
+            ]
+            if self._is_assignment_valid(dnn_index, assignment):
+                return assignment
+        cloud_candidates = [idx for idx, node in enumerate(self.env.nodes) if node.level == 3]
+        if cloud_candidates:
+            assignment = [cloud_candidates[0] for _ in range(task_count)]
+            if self._is_assignment_valid(dnn_index, assignment):
+                return assignment
+        return None
+
+    def _sa_neighbor_assignment(self, dnn_index: int, assignment: List[int]) -> List[int]:
+        """对一个部署向量执行单任务迁移邻域扰动。"""
+        dnn = self.env.ds[dnn_index]
+        task_count = len(dnn.tasks)
+        for _ in range(100):
+            candidate = list(assignment)
+            task_idx = int(random.random() * task_count)
+            node_idx = int(random.random() * len(self.env.nodes))
+            candidate[task_idx] = node_idx
+            if self._is_assignment_valid(dnn_index, candidate):
+                return candidate
+        return list(assignment)
+
+    def _sa_candidate_score(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        weights: tuple[float, float, float, float],
+    ) -> tuple[float, ObjectiveValues]:
+        """返回 SA 接受准则使用的偏好评分和候选目标值。"""
+        values = self._evaluate_assignment(dnn_index, assignment)
+        if not values.deadline_feasible:
+            return -math.inf, values
+        w_a, w_r, w_t, w_e = weights
+        score = self._score(*values.vector, w_a, w_r, w_t, w_e)
+        return score, values
+
+    def _sample_random_pareto_archive(
+        self,
+        dnn_index: int,
+        algorithm: str,
+        sample_count: int,
+        weights: tuple[float, float, float, float],
+    ) -> tuple[
+        List[Dict[str, float | int | str]],
+        List[int] | None,
+        ObjectiveValues | None,
+    ]:
+        """随机采样可行部署，返回非支配 archive 和偏好最优解。"""
+        archive: List[Dict[str, float | int | str]] = []
+        best_assignment: List[int] | None = None
+        best_values: ObjectiveValues | None = None
+        best_score = -math.inf
+        point_index = 0
+        for _ in range(sample_count):
+            assignment = self._random_valid_assignment(dnn_index, max_attempts=50)
+            if assignment is None:
+                continue
+            score, values = self._sa_candidate_score(dnn_index, assignment, weights)
+            point = self._assignment_pareto_point(algorithm, dnn_index, assignment, point_index)
+            if point is not None:
+                archive.append(point)
+                point_index += 1
+            if score > best_score:
+                best_score = score
+                best_assignment = list(assignment)
+                best_values = values
+        return self._filter_pareto_points(archive), best_assignment, best_values
+
+    def run_simulated_annealing(self, reset_snapshot: List[Node]) -> ExperimentMetrics:
+        """运行多目标模拟退火基线，并在 Pareto 实验中导出四目标候选前沿。"""
+        self.pareto_points = []
         run_time = time.monotonic()
+        max_a = 1.0
+        max_r = 1.0
+        max_t = 2000.0
+        min_a = 0.0
+        min_r = 0.0
+        min_t = 200.0
         t_res = 0.0
         r_res = 0.0
         a_res = 0.0
@@ -1899,37 +2433,151 @@ class AllDNNRefactor:
                 continue
             t = next_dnn_index
             self.env.print_pending_dnn_info(t)
-            assignment = [-1 for _ in range(self.max_dnn_num)]
-            started = time.monotonic()
-            o = 0
-            while True:
-                if (time.monotonic() - started) * 1000 > 20000:
-                    o = 1
-                    break
-                xs = [[0 for _ in range(len(self.env.nodes))] for _ in range(len(self.env.ds[t].tasks))]
-                p = 0
-                while p < len(self.env.ds[t].tasks):
-                    n = int(random.random() * len(self.env.nodes))
-                    xs[p][n] = 1
-                    if self.env.check_resource(self.env.ds[t], xs) and (self.env.nodes[n].level != 1 or n == self.env.ds[t].initiateNode):
-                        p += 1
-                    else:
-                        xs[p][n] = 0
-                if self.env.check_delay_random(self.env.ds[t], xs):
-                    for p in range(len(self.env.ds[t].tasks)):
-                        for n in range(len(self.env.nodes)):
-                            if xs[p][n] == 1:
-                                assignment[p] = n
-                    break
-            if o == 1:
+            context = self._build_dnn_context(t)
+            seed_assignments: List[List[int]] = []
+            random_seed = self._random_valid_assignment(t)
+            if random_seed is not None:
+                seed_assignments.append(random_seed)
+            for mode in ("cloud", "local", "resource", "stability", "topology", "random"):
+                seed = self._heuristic_assignment(t, context, mode)
+                if self._is_assignment_valid(t, seed):
+                    seed_assignments.append(seed)
+            if not seed_assignments:
+                failure_dnn += 1
+                next_dnn_index += 1
+                self.env.advance_time_slot()
+                continue
+            archive: List[Dict[str, float | int | str]] = []
+            point_index = 0
+            final_weights = self._resolve_preference_weights(t, min_a, max_a, min_r, max_r, min_t, max_t)
+            best_assignment = list(seed_assignments[0])
+            best_score = -math.inf
+            best_values = self._evaluate_assignment(t, best_assignment)
+            original_preference = self.preference
+            weight_profiles = list(dict.fromkeys(self.sa_weight_profiles))
+            if "adaptive" not in weight_profiles:
+                weight_profiles.insert(0, "adaptive")
+            steps = max(1, self.iteration_limit * max(1, self.sa_steps_multiplier))
+            try:
+                for profile in weight_profiles:
+                    self.preference = profile
+                    weights = self._resolve_preference_weights(t, min_a, max_a, min_r, max_r, min_t, max_t)
+                    scored_seeds = []
+                    for seed in seed_assignments:
+                        seed_score, seed_values = self._sa_candidate_score(t, seed, weights)
+                        final_seed_score, _ = self._sa_candidate_score(t, seed, final_weights)
+                        scored_seeds.append((seed_score, seed, seed_values))
+                        seed_point = self._assignment_pareto_point("sa", t, seed, point_index)
+                        if seed_point is not None:
+                            archive.append(seed_point)
+                            point_index += 1
+                        if final_seed_score > best_score:
+                            best_assignment = list(seed)
+                            best_score = final_seed_score
+                            best_values = seed_values
+                    current_score, current, _ = max(scored_seeds, key=lambda item: item[0])
+                    current = list(current)
+
+                    for step in range(steps):
+                        progress = step / max(steps - 1, 1)
+                        temperature = self.sa_initial_temperature * (
+                            self.sa_final_temperature / self.sa_initial_temperature
+                        ) ** progress
+                        candidate = self._sa_neighbor_assignment(t, current)
+                        candidate_score, candidate_values = self._sa_candidate_score(t, candidate, weights)
+                        final_candidate_score, _ = self._sa_candidate_score(t, candidate, final_weights)
+                        candidate_point = self._assignment_pareto_point("sa", t, candidate, point_index)
+                        if candidate_point is not None:
+                            archive.append(candidate_point)
+                            point_index += 1
+                        delta = candidate_score - current_score
+                        if current_score == -math.inf:
+                            accept = True
+                        elif delta >= 0:
+                            accept = True
+                        else:
+                            accept = random.random() < math.exp(delta / max(temperature, 1e-9))
+                        if accept:
+                            current = candidate
+                            current_score = candidate_score
+                        if final_candidate_score > best_score:
+                            best_assignment = list(candidate)
+                            best_score = final_candidate_score
+                            best_values = candidate_values
+            finally:
+                self.preference = original_preference
+
+            archive = self._filter_pareto_points(archive)
+            self.pareto_points.extend(archive)
+            if not best_values.deadline_feasible:
+                failure_dnn += 1
+                next_dnn_index += 1
+                self.env.advance_time_slot()
+                continue
+            delay = best_values.estimated_delay
+            total_energy = best_values.total_energy
+            self._register_running_dnn(t, best_assignment, delay)
+            t_res += delay
+            r_res += best_values.operational_stability
+            a_res += best_values.inference_fidelity
+            e_res += total_energy
+            success_dnn += 1
+            next_dnn_index += 1
+            self.env.advance_time_slot()
+        self._advance_until_drained()
+        return ExperimentMetrics(
+            avg_delay=t_res / success_dnn if success_dnn else 0.0,
+            avg_operational_stability_score=r_res / success_dnn if success_dnn else 0.0,
+            avg_inference_fidelity_score=a_res / success_dnn if success_dnn else 0.0,
+            avg_energy=e_res / success_dnn if success_dnn else 0.0,
+            failure_count=failure_dnn,
+            runtime_ms=int((time.monotonic() - run_time) * 1000),
+        )
+
+    def run_random(self, reset_snapshot: List[Node]) -> ExperimentMetrics:
+        """运行随机部署基线。"""
+        self.pareto_points = []
+        run_time = time.monotonic()
+        max_a = 1.0
+        max_r = 1.0
+        max_t = 2000.0
+        min_a = 0.0
+        min_r = 0.0
+        min_t = 200.0
+        t_res = 0.0
+        r_res = 0.0
+        a_res = 0.0
+        e_res = 0.0
+        failure_dnn = 0
+        success_dnn = 0
+        self.env.reset_nodes(reset_snapshot)
+        next_dnn_index = 0
+        while next_dnn_index < self.env.t_max or self.env.running_dnns:
+            if next_dnn_index >= self.env.t_max:
+                self.env.advance_time_slot()
+                continue
+            t = next_dnn_index
+            self.env.print_pending_dnn_info(t)
+            weights = self._resolve_preference_weights(t, min_a, max_a, min_r, max_r, min_t, max_t)
+            sample_count = max(self.iteration_limit, self.pop_size, 1)
+            archive, assignment, values = self._sample_random_pareto_archive(
+                t,
+                "random",
+                sample_count,
+                weights,
+            )
+            self.pareto_points.extend(archive)
+            if assignment is None or values is None or not values.deadline_feasible:
                 failure_dnn += 1
                 next_dnn_index += 1
                 self.env.advance_time_slot()
                 continue
             # 随机基线保留原来的随机放置逻辑，
             # 只把评价方式和执行语义切换到新的动态环境模型。
-            f1, f2, f3, _, delay = self._evaluate_assignment(t, assignment)
-            total_energy = self.env.count_total_energy_by_assignment(t, self._assignment_slice(t, assignment))
+            f1 = values.inference_fidelity
+            f2 = values.operational_stability
+            delay = values.estimated_delay
+            total_energy = values.total_energy
             self._register_running_dnn(t, assignment, delay)
             t_res += delay
             r_res += f2
@@ -1941,8 +2589,8 @@ class AllDNNRefactor:
         self._advance_until_drained()
         return ExperimentMetrics(
             avg_delay=t_res / success_dnn if success_dnn else 0.0,
-            avg_operation=r_res / success_dnn if success_dnn else 0.0,
-            avg_accuracy=a_res / success_dnn if success_dnn else 0.0,
+            avg_operational_stability_score=r_res / success_dnn if success_dnn else 0.0,
+            avg_inference_fidelity_score=a_res / success_dnn if success_dnn else 0.0,
             avg_energy=e_res / success_dnn if success_dnn else 0.0,
             failure_count=failure_dnn,
             runtime_ms=int((time.monotonic() - run_time) * 1000),
@@ -1967,6 +2615,8 @@ class AllDNNRefactor:
             self.env.print_pending_dnn_info(t)
             node_list = self.env.clone_nodes()
             r = [0 for _ in range(len(self.env.ds[t].tasks))]
+            self._max_resource_delay_cache = {}
+            self._max_resource_last_delay = None
             self.start_time = time.monotonic()
             if self.max_resource_placement(r, self.env.ds[t], 0, node_list):
                 pass
@@ -1977,8 +2627,12 @@ class AllDNNRefactor:
                     next_dnn_index += 1
                     self.env.advance_time_slot()
                     continue
-            f1, f2, f3, _, delay = self._evaluate_assignment(t, r)
-            _ = f3
+            values = self._evaluate_assignment(t, r, self._max_resource_last_delay)
+            f1, f2, delay = (
+                values.inference_fidelity,
+                values.operational_stability,
+                values.estimated_delay,
+            )
             total_energy = self.env.count_total_energy_by_assignment(t, self._assignment_slice(t, r))
             self._register_running_dnn(t, r, delay)
             t_res += delay
@@ -1992,8 +2646,66 @@ class AllDNNRefactor:
         denominator = success_dnn
         return ExperimentMetrics(
             avg_delay=t_res / denominator if denominator else 0.0,
-            avg_operation=r_res / denominator if denominator else 0.0,
-            avg_accuracy=a_res / denominator if denominator else 0.0,
+            avg_operational_stability_score=r_res / denominator if denominator else 0.0,
+            avg_inference_fidelity_score=a_res / denominator if denominator else 0.0,
+            avg_energy=e_res / denominator if denominator else 0.0,
+            failure_count=failure_dnn,
+            runtime_ms=int((time.monotonic() - run_time) * 1000),
+        )
+
+    def run_max_resource_fast(self, reset_snapshot: List[Node]) -> ExperimentMetrics:
+        """运行有界快速搜索版最大剩余资源基线。"""
+        run_time = time.monotonic()
+        t_res = 0.0
+        r_res = 0.0
+        a_res = 0.0
+        e_res = 0.0
+        failure_dnn = 0
+        success_dnn = 0
+        self.env.reset_nodes(reset_snapshot)
+        next_dnn_index = 0
+        while next_dnn_index < self.env.t_max or self.env.running_dnns:
+            if next_dnn_index >= self.env.t_max:
+                self.env.advance_time_slot()
+                continue
+            t = next_dnn_index
+            self.env.print_pending_dnn_info(t)
+            node_list = self.env.clone_nodes()
+            r = [0 for _ in range(len(self.env.ds[t].tasks))]
+            self._max_resource_delay_cache = {}
+            self._max_resource_last_delay = None
+            self.start_time = time.monotonic()
+            if self._max_resource_fast_beam(r, self.env.ds[t], node_list):
+                pass
+            else:
+                r = [0 for _ in range(len(self.env.ds[t].tasks))]
+                node_list = self.env.clone_nodes()
+                if not self._max_resource_placement_budget(r, self.env.ds[t], 0, node_list):
+                    failure_dnn += 1
+                    next_dnn_index += 1
+                    self.env.advance_time_slot()
+                    continue
+            values = self._evaluate_assignment(t, r, self._max_resource_last_delay)
+            f1, f2, delay = (
+                values.inference_fidelity,
+                values.operational_stability,
+                values.estimated_delay,
+            )
+            total_energy = self.env.count_total_energy_by_assignment(t, self._assignment_slice(t, r))
+            self._register_running_dnn(t, r, delay)
+            t_res += delay
+            r_res += f2
+            a_res += f1
+            e_res += total_energy
+            success_dnn += 1
+            next_dnn_index += 1
+            self.env.advance_time_slot()
+        self._advance_until_drained()
+        denominator = success_dnn
+        return ExperimentMetrics(
+            avg_delay=t_res / denominator if denominator else 0.0,
+            avg_operational_stability_score=r_res / denominator if denominator else 0.0,
+            avg_inference_fidelity_score=a_res / denominator if denominator else 0.0,
             avg_energy=e_res / denominator if denominator else 0.0,
             failure_count=failure_dnn,
             runtime_ms=int((time.monotonic() - run_time) * 1000),
@@ -2027,8 +2739,12 @@ class AllDNNRefactor:
                     next_dnn_index += 1
                     self.env.advance_time_slot()
                     continue
-            f1, f2, f3, _, delay = self._evaluate_assignment(t, r)
-            _ = f3
+            values = self._evaluate_assignment(t, r)
+            f1, f2, delay = (
+                values.inference_fidelity,
+                values.operational_stability,
+                values.estimated_delay,
+            )
             total_energy = self.env.count_total_energy_by_assignment(t, self._assignment_slice(t, r))
             self._register_running_dnn(t, r, delay)
             t_res += delay
@@ -2042,8 +2758,8 @@ class AllDNNRefactor:
         denominator = success_dnn
         return ExperimentMetrics(
             avg_delay=t_res / denominator if denominator else 0.0,
-            avg_operation=r_res / denominator if denominator else 0.0,
-            avg_accuracy=a_res / denominator if denominator else 0.0,
+            avg_operational_stability_score=r_res / denominator if denominator else 0.0,
+            avg_inference_fidelity_score=a_res / denominator if denominator else 0.0,
             avg_energy=e_res / denominator if denominator else 0.0,
             failure_count=failure_dnn,
             runtime_ms=int((time.monotonic() - run_time) * 1000),

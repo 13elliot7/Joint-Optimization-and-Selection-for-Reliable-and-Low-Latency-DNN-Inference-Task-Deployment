@@ -1,0 +1,45 @@
+Response to Reviewer #2
+
+Reviewer#2, Concern#1: The authors can include the contributions of recent papers
+and provide a tabular comparative analysis between their work and previous research,
+highlighting the unique contribution of their paper.
+
+【tabular 待解决】
+
+Author response:
+Thanks for the suggestion. We have expanded the Related Work section by adding
+recent studies from 2025 and 2026 on DNN inference deployment, energy-aware edge
+inference, DAG-aware scheduling, reliability-aware edge computing, and multi-
+objective optimization. The revised discussion clarifies the gap addressed by this
+paper: dynamic DAG-aware deployment under joint service reliability, inference
+accuracy, inference delay, and total energy consumption.
+
+Author action:
+We revised Section 2 and updated the reference list. The revised Related Work
+section now explicitly compares existing studies with the proposed DAREED design
+from the perspectives of DNN topology, dynamic reliability, link reliability, energy
+consumption, and preference-based multi-objective deployment.
+
+Reviewer#2, Concern#2: The authors assume an oversimplistic constant service
+reliability of computing nodes during execution, which is impractical in real systems.
+
+Author response:
+Thanks for the comment. We agree and have revised the model. Node service
+reliability is no longer constant. It is dynamically updated according to node load and
+heat state. This better reflects mobile edge environments where overloaded or
+overheated nodes may become less stable during long-running inference service.
+
+Author action:
+We added dynamic service reliability and dynamic inference accuracy equations in
+Section 4 and added dynamic degradation experiments in Section 6.
+
+Reviewer#2, Concern#3: The authors only consider reliability of computing nodes
+while ignoring the reliability of communication links.
+
+Author response:
+Thanks for this important suggestion. The revised model includes communication link
+reliability. Link reliability changes with link load and heat state, and the service
+reliability of a DNN request considers both the computing nodes and communication
+links traversed by input uploading, intermediate dependency transmission, and output
+returning.
+

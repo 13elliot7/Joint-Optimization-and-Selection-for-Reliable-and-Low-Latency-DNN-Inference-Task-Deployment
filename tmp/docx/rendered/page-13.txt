@@ -1,0 +1,45 @@
+Author action:
+We revised the service reliability model in Section 4 and updated the objective
+formulation.
+
+Reviewer#3, Concern#6: Comparing the proposed method only against simple
+heuristics is unfair. The algorithm should be evaluated against recent state-of-the-art
+multi-objective optimization algorithms or learning-based deployment strategies.
+
+Author response:
+Thanks for the suggestion. We have expanded the baseline set. In the revised
+experiments, DAREED is compared with a generic NSGA-II based evolutionary
+deployment algorithm, simulated annealing, random feasible deployment, maximum-
+resource deployment, local-first deployment, and RTBL, which is a reliability-aware
+task scheduling method based on Lyapunov optimization and bandit learning. This
+allows us to evaluate both Pareto-front quality and online deployment performance
+against stronger baselines.
+
+Author action:
+We revised Section 6 to add comparison algorithms and separate Pareto-front quality
+evaluation from final deployment performance evaluation.
+
+Reviewer#3, Concern#7: The experimental setup with ten edge nodes and one cloud
+node is too small to represent realistic large-scale edge computing scenarios. The high
+theoretical complexity raises scalability concerns.
+
+Author response:
+Thanks for the comment. We have added scalability experiments under small,
+medium, and large topologies. The large topology includes 1 cloud node, 60 edge
+nodes, and 300 end devices. We also report running time to evaluate whether
+DAREED remains practical as network scale and request load increase.
+
+Author action:
+We added large-scale network evaluation and runtime reporting in Section 6. We also
+revised Section 5 to discuss algorithm complexity.
+
+Reviewer#3, Concern#8: The simulation relies on static parameter ranges and does
+not incorporate dynamic factors such as bandwidth fluctuations, node mobility, or
+background traffic variations.
+
+Author response:
+Thanks for the suggestion. We have revised the simulation model to include dynamic
+network and node states. Effective bandwidth changes with link load, while link
+reliability changes with link load and heat. Node reliability and inference accuracy
+also change with node load and heat. Although explicit mobility modeling is left for
+

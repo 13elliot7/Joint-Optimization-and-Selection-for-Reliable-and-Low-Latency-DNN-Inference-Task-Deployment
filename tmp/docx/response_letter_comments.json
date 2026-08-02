@@ -1,0 +1,305 @@
+{
+  "file": "/Users/hlz/Documents/Project/DNN inference reliability optim/paperwork/重投/0724-批注-response letter.docx",
+  "comment_count": 13,
+  "comments": [
+    {
+      "id": "0",
+      "author": "王颖",
+      "date": "2026-07-24T07:43:22Z",
+      "initials": "",
+      "resolved": false,
+      "text": "强调专门化的设计和创新",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Second, the algorithm has been redesigned and renamed as DAREED. Rather than directly applying a generic NSGA-II framework, DAREED embeds DNN DAG information and dynamic resource states into initializ"
+            },
+            {
+              "where": "end",
+              "text": "Second, the algorithm has been redesigned and renamed as DAREED. Rather than directly applying a generic NSGA-II framework, DAREED embeds DNN DAG information and dynamic resource states into initializ"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1",
+      "author": "王颖",
+      "date": "2026-07-24T07:48:31Z",
+      "initials": "",
+      "resolved": false,
+      "text": "再斟酌一下论文题目，当前仅体现其中两个目标",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Thanks for pointing out this inconsistency. We have revised the terminology throughout the manuscript. The term “accuracy reliability” has been replaced by inference accuracy, and the optimization obj"
+            },
+            {
+              "where": "end",
+              "text": "Thanks for pointing out this inconsistency. We have revised the terminology throughout the manuscript. The term “accuracy reliability” has been replaced by inference accuracy, and the optimization obj"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "author": "王颖",
+      "date": "2026-07-24T07:56:44Z",
+      "initials": "",
+      "resolved": false,
+      "text": "总体来说， action部分均略显简略，这里可以再描述的详细些，或直接引用原文部分文字，图表，或提供更细节的章节号、页码、图、表、公式编号",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "We revised Section 4 to define dynamic node reliability and dynamic inference accuracy. We also revised Section 6 to state that experiments are repeated under different random seeds and that mean and "
+            },
+            {
+              "where": "end",
+              "text": "We revised Section 4 to define dynamic node reliability and dynamic inference accuracy. We also revised Section 6 to state that experiments are repeated under different random seeds and that mean and "
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "author": "王颖",
+      "date": "2026-07-24T07:59:20Z",
+      "initials": "",
+      "resolved": false,
+      "text": "同前，下同",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "We revised the mathematical formulation of service reliability and inference accuracy in Section 4 and updated the notation table accordingly."
+            },
+            {
+              "where": "end",
+              "text": "We revised the mathematical formulation of service reliability and inference accuracy in Section 4 and updated the notation table accordingly."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "author": "王颖",
+      "date": "2026-07-24T08:10:42Z",
+      "initials": "",
+      "resolved": false,
+      "text": "确认这一点是否呼应了，定量的差距报告",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Reviewer#1, Concern#12: Baselines LB and LPD are single-policy heuristics rather than multi-objective methods. The manuscript could better contextualize percentage improvements and discuss limitations"
+            },
+            {
+              "where": "end",
+              "text": "Reviewer#1, Concern#12: Baselines LB and LPD are single-policy heuristics rather than multi-objective methods. The manuscript could better contextualize percentage improvements and discuss limitations"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "author": "王颖",
+      "date": "2026-07-24T08:13:14Z",
+      "initials": "",
+      "resolved": false,
+      "text": "添加表格、优化related word的逻辑、精简文字",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "【tabular待解决】"
+            },
+            {
+              "where": "end",
+              "text": "【tabular待解决】"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "author": "王颖",
+      "date": "2026-07-24T08:15:30Z",
+      "initials": "",
+      "resolved": false,
+      "text": "需要引用描述一下具体的规模",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Thanks for the suggestion. We have added a large-scale network evaluation. The revised experimental design includes small, medium, and large network scenarios. ."
+            },
+            {
+              "where": "end",
+              "text": "Thanks for the suggestion. We have added a large-scale network evaluation. The revised experimental design includes small, medium, and large network scenarios. ."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "author": "王颖",
+      "date": "2026-07-24T08:17:30Z",
+      "initials": "",
+      "resolved": false,
+      "text": "需要进一步提供并说明一下当前的复杂度分析结论和运行时间实验结果",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Thanks for the comment. We have revised the algorithm design to include complexity analysis and scalability-oriented mechanisms. DAREED limits exhaustive search by using DAG-aware initialization, reso"
+            },
+            {
+              "where": "end",
+              "text": "Thanks for the comment. We have revised the algorithm design to include complexity analysis and scalability-oriented mechanisms. DAREED limits exhaustive search by using DAG-aware initialization, reso"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "author": "王颖",
+      "date": "2026-07-24T08:21:10Z",
+      "initials": "",
+      "resolved": false,
+      "text": "可以补充说明：能耗也是成本模型的重要组成部分，和资源成本相关",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Thanks for the suggestion. We have incorporated total energy consumption as an optimization objective. The revised energy model includes computation energy and transmission energy. DAREED uses energy "
+            },
+            {
+              "where": "end",
+              "text": "Thanks for the suggestion. We have incorporated total energy consumption as an optimization objective. The revised energy model includes computation energy and transmission energy. DAREED uses energy "
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "author": "王颖",
+      "date": "2026-07-24T09:49:19Z",
+      "initials": "",
+      "resolved": false,
+      "text": "解释目的和效果是什么",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "We revised Section 5 to clarify the two-stage framework of evolutionary candidate search and preference-based deployment selection. We also added application preference experiments in Section 6."
+            },
+            {
+              "where": "end",
+              "text": "We revised Section 5 to clarify the two-stage framework of evolutionary candidate search and preference-based deployment selection. We also added application preference experiments in Section 6."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "author": "王颖",
+      "date": "2026-07-24T09:51:25Z",
+      "initials": "",
+      "resolved": false,
+      "text": "这一点是否回应了？",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Reviewer#3, Concern#5: The reliability calculation multiplies assigned node reliabilities and assumes independent subtask failures. If multiple layers are deployed on the same node, failure of that no"
+            },
+            {
+              "where": "end",
+              "text": "Reviewer#3, Concern#5: The reliability calculation multiplies assigned node reliabilities and assumes independent subtask failures. If multiple layers are deployed on the same node, failure of that no"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "author": "王颖",
+      "date": "2026-07-24T09:52:11Z",
+      "initials": "",
+      "resolved": false,
+      "text": "用定语从句强调一下算法的创新性和tailed design",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Thanks for the suggestion. We have expanded the baseline set. In the revised experiments, DAREED is compared with a generic NSGA-II based evolutionary deployment algorithm, simulated annealing, random"
+            },
+            {
+              "where": "end",
+              "text": "Thanks for the suggestion. We have expanded the baseline set. In the revised experiments, DAREED is compared with a generic NSGA-II based evolutionary deployment algorithm, simulated annealing, random"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "author": "王颖",
+      "date": "2026-07-24T09:54:07Z",
+      "initials": "",
+      "resolved": false,
+      "text": "结论？",
+      "anchors": [
+        {
+          "part": "word/document.xml",
+          "paragraphs": [
+            {
+              "where": "start",
+              "text": "Thanks for the comment. We have added scalability experiments under small, medium, and large topologies. The large topology includes 1 cloud node, 60 edge nodes, and 300 end devices. We also report ru"
+            },
+            {
+              "where": "end",
+              "text": "Thanks for the comment. We have added scalability experiments under small, medium, and large topologies. The large topology includes 1 cloud node, 60 edge nodes, and 300 end devices. We also report ru"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

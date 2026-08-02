@@ -1,0 +1,1266 @@
+[
+  {
+    "page": 1,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722100035+08'00'",
+    "modified": "D:20260722100035+08'00'",
+    "marked_text": "degradation,",
+    "rect": [
+      150.553,
+      400.941,
+      196.883,
+      408.975
+    ]
+  },
+  {
+    "page": 1,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "参照期刊其他论文，确认是否需要定量结论",
+    "created": "D:20260722100505+08'00'",
+    "modified": "D:20260722100523+08'00'",
+    "marked_text": "The results demonstrate that DAREED achieves a favorable balance among reliability, accuracy, delay, and energy efficiency under online DNN inference workloads.",
+    "rect": [
+      48.964,
+      281.399,
+      300.023,
+      309.349
+    ]
+  },
+  {
+    "page": 1,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "energy-efficient？",
+    "created": "D:20260722100547+08'00'",
+    "modified": "D:20260722100555+08'00'",
+    "marked_text": "Index Terms—DNN",
+    "rect": [
+      58.927,
+      265.354,
+      115.093,
+      273.432
+    ]
+  },
+  {
+    "page": 1,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "应用场景是否可以更新一下？",
+    "created": "D:20260722100936+08'00'",
+    "modified": "D:20260722100945+08'00'",
+    "marked_text": "intelligent security and intelligent inspection",
+    "rect": [
+      119.16,
+      119.942,
+      300.022,
+      128.908
+    ]
+  },
+  {
+    "page": 1,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这段文字以能耗开头，但论述能耗较少，逻辑上稍显不一致。另外，本文能耗优化的确切目标是什么？",
+    "created": "D:20260722101757+08'00'",
+    "modified": "D:20260722101931+08'00'",
+    "marked_text": "Energy consumption",
+    "rect": [
+      321.94,
+      103.731,
+      406.762,
+      112.697
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "动态是不是应该作为environment的修饰？",
+    "created": "D:20260722102209+08'00'",
+    "modified": "D:20260722102228+08'00'",
+    "marked_text": "Motivatedbytheseobservations,thispaperstudiesdynamic",
+    "rect": [
+      265.711,
+      426.52,
+      300.022,
+      435.486
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "可靠性“退化”如何理解？在后面的模型和算法中如何体现？",
+    "created": "D:20260722103044+08'00'",
+    "modified": "D:20260724073301+08'00'",
+    "marked_text": "degradation",
+    "rect": [
+      253.138,
+      115.686,
+      300.022,
+      124.653
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "three or four?",
+    "created": "D:20260722103157+08'00'",
+    "modified": "D:20260722103206+08'00'",
+    "marked_text": "gratesthree-objectiveParetocandidategeneration,DAG-aware",
+    "rect": [
+      338.22,
+      725.399,
+      358.135,
+      734.366
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "与模板中的章节标号形式保持一致，正文是罗马数字",
+    "created": "D:20260722103320+08'00'",
+    "modified": "D:20260724073439+08'00'",
+    "marked_text": "2reviewsrelatedworkonDNNinferencedeployment,reliable",
+    "rect": [
+      311.978,
+      557.227,
+      316.959,
+      566.193
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722103328+08'00'",
+    "modified": "D:20260722103328+08'00'",
+    "marked_text": "3",
+    "rect": [
+      558.054,
+      545.271,
+      563.036,
+      554.237
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722103336+08'00'",
+    "modified": "D:20260722103336+08'00'",
+    "marked_text": "4",
+    "rect": [
+      510.383,
+      533.326,
+      515.365,
+      542.282
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722103339+08'00'",
+    "modified": "D:20260722103339+08'00'",
+    "marked_text": "5",
+    "rect": [
+      558.054,
+      521.361,
+      563.036,
+      530.377
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722103342+08'00'",
+    "modified": "D:20260722103342+08'00'",
+    "marked_text": "presentstheproposedDAREEDalgorithm.Section6evaluates",
+    "rect": [
+      519.051,
+      509.406,
+      524.032,
+      518.382
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722103345+08'00'",
+    "modified": "D:20260722103345+08'00'",
+    "marked_text": "7",
+    "rect": [
+      345.353,
+      485.506,
+      350.334,
+      494.462
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "如需精简篇幅，可删除",
+    "created": "D:20260722103417+08'00'",
+    "modified": "D:20260722103429+08'00'",
+    "marked_text": "The discussion focuses on the limi- tations of existing deployment models under dynamic cloud- edge-end inference environments and motivates the design of a DAG-aware evolutionary deployment algorithm.",
+    "rect": [
+      311.978,
+      379.42,
+      563.036,
+      424.251
+    ]
+  },
+  {
+    "page": 2,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这里强调一下针对性的设计",
+    "created": "D:20260724073348+08'00'",
+    "modified": "D:20260724073400+08'00'",
+    "marked_text": "gratesthree-objectiveParetocandidategeneration,DAG-aware",
+    "rect": [
+      311.978,
+      725.399,
+      335.769,
+      734.366
+    ]
+  },
+  {
+    "page": 3,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722104707+08'00'",
+    "modified": "D:20260722104707+08'00'",
+    "marked_text": "preserving",
+    "rect": [
+      520.983,
+      509.529,
+      563.035,
+      518.495
+    ]
+  },
+  {
+    "page": 3,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这一段和DAG相关的内容超出了原有标题和概述段的内容，并且出现在了insummary后面，组织逻辑上有些问题",
+    "created": "D:20260722105447+08'00'",
+    "modified": "D:20260722105532+08'00'",
+    "marked_text": "Recent studies",
+    "rect": [
+      321.94,
+      509.529,
+      383.22,
+      518.495
+    ]
+  },
+  {
+    "page": 3,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "B和前面的A.3)是什么关系，都涉及reliability",
+    "created": "D:20260722105543+08'00'",
+    "modified": "D:20260722105601+08'00'",
+    "marked_text": "Reliability-aware Edge Computing",
+    "rect": [
+      325.537,
+      323.706,
+      466.538,
+      332.552
+    ]
+  },
+  {
+    "page": 4,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "总结应更具针对性，围绕B。reliability即可",
+    "created": "D:20260722105053+08'00'",
+    "modified": "D:20260722111623+08'00'",
+    "marked_text": "However, existing reliability-aware edge computing studies are rarely designed forDAG-structuredDNNinferencetasks.Theyusuallydonot",
+    "rect": [
+      48.964,
+      462.023,
+      300.022,
+      494.899
+    ]
+  },
+  {
+    "page": 4,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722105119+08'00'",
+    "modified": "D:20260722105119+08'00'",
+    "marked_text": "This paper addresses this gap by modeling DNN inference requests as DAGsandevaluatingservicereliabilityandinferenceaccuracy",
+    "rect": [
+      48.964,
+      402.247,
+      300.022,
+      435.123
+    ]
+  },
+  {
+    "page": 4,
+    "type": "Text",
+    "author": "王颖",
+    "subject": "注解",
+    "comment": "从此处开始的这一段的结论和上面的文献不全对应，结论超出了可靠性的范畴",
+    "created": "D:20260722105228+08'00'",
+    "modified": "D:20260722105309+08'00'",
+    "marked_text": "",
+    "rect": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "page": 4,
+    "type": "Text",
+    "author": "王颖",
+    "subject": "注解",
+    "comment": "",
+    "created": "D:20260722111530+08'00'",
+    "modified": "D:20260722111530+08'00'",
+    "marked_text": "",
+    "rect": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "page": 5,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722110936+08'00'",
+    "modified": "D:20260722110936+08'00'",
+    "marked_text": "maypreferlowertotalenergyconsumption.Asingle-objective",
+    "rect": [
+      120.326,
+      713.444,
+      221.775,
+      722.41
+    ]
+  },
+  {
+    "page": 5,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722111146+08'00'",
+    "modified": "D:20260722111146+08'00'",
+    "marked_text": "heat state,",
+    "rect": [
+      218.498,
+      415.332,
+      260.829,
+      423.531
+    ]
+  },
+  {
+    "page": 5,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这句话不是支持动态性的？",
+    "created": "D:20260722111227+08'00'",
+    "modified": "D:20260722111239+08'00'",
+    "marked_text": "servingseveralrequests.Similarly,alinkwithsufficientband- widthmaybecomecongested,leadingtolargerinferencedelay and lower communication reliability.",
+    "rect": [
+      48.964,
+      342.834,
+      300.022,
+      375.71
+    ]
+  },
+  {
+    "page": 5,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722111317+08'00'",
+    "modified": "D:20260722111317+08'00'",
+    "marked_text": "??,",
+    "rect": [
+      158.373,
+      211.327,
+      168.336,
+      220.353
+    ]
+  },
+  {
+    "page": 5,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "此图有几处需要改善：\n1）最上面的物理平面是否有必要，即使保留是不是应该放在下面和灰色平面合并为一个\n2）图标替换，云形图标会给人以网络的错觉，其他图标也可以看看能否替换为更生动的\n3）图例貌似不全，虚线originating是什么含义\n？\n4）红、黄、绿平面和浅蓝色平面是什么关系？赶紧这两个平面也有冗余\n",
+    "created": "D:20260722111824+08'00'",
+    "modified": "D:20260722112318+08'00'",
+    "marked_text": "MotivatingexampleofdynamicDAG-awareDNNinferencedeploy-",
+    "rect": [
+      338.734,
+      599.621,
+      439.34,
+      606.795
+    ]
+  },
+  {
+    "page": 5,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "仅考虑热的因素吗？",
+    "created": "D:20260722112405+08'00'",
+    "modified": "D:20260722112426+08'00'",
+    "marked_text": "caused by accumulated heat,",
+    "rect": [
+      311.978,
+      458.659,
+      563.036,
+      478.813
+    ]
+  },
+  {
+    "page": 5,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这个和前面的time-varing load of transimission links有重复吗？",
+    "created": "D:20260722112500+08'00'",
+    "modified": "D:20260722112529+08'00'",
+    "marked_text": "the effective bandwidth variation of links,",
+    "rect": [
+      389.377,
+      458.659,
+      560.545,
+      466.858
+    ]
+  },
+  {
+    "page": 5,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "图1中的命名应与此处一致",
+    "created": "D:20260722164105+08'00'",
+    "modified": "D:20260722164123+08'00'",
+    "marked_text": "computing node",
+    "rect": [
+      377.303,
+      343.533,
+      442.558,
+      352.499
+    ]
+  },
+  {
+    "page": 6,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "链路是否存在heat这个概念？ ",
+    "created": "D:20260722164528+08'00'",
+    "modified": "D:20260722164550+08'00'",
+    "marked_text": "The link heat",
+    "rect": [
+      130.169,
+      93.4971,
+      184.734,
+      102.573
+    ]
+  },
+  {
+    "page": 6,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "or前后连接的是相同的含义吗？",
+    "created": "D:20260722164937+08'00'",
+    "modified": "D:20260722165002+08'00'",
+    "marked_text": "or",
+    "rect": [
+      554.737,
+      535.022,
+      563.035,
+      543.989
+    ]
+  },
+  {
+    "page": 6,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "服务持续时间与推理时延是否是同一个概念？",
+    "created": "D:20260722165332+08'00'",
+    "modified": "D:20260722165349+08'00'",
+    "marked_text": "The running time is estimated by the delay model",
+    "rect": [
+      311.978,
+      463.08,
+      563.035,
+      484.002
+    ]
+  },
+  {
+    "page": 6,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这个传播时延与前面提到的层间传输时延是一回事吗？",
+    "created": "D:20260722165502+08'00'",
+    "modified": "D:20260722165524+08'00'",
+    "marked_text": "propagation delay",
+    "rect": [
+      391.35,
+      297.355,
+      463.499,
+      306.322
+    ]
+  },
+  {
+    "page": 6,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这个表我没有细看，最后再对照检查一下",
+    "created": "D:20260724073557+08'00'",
+    "modified": "D:20260724073612+08'00'",
+    "marked_text": "TABLEI PARAMETERSYMBOLS",
+    "rect": [
+      136.194,
+      718.512,
+      212.93,
+      732.934
+    ]
+  },
+  {
+    "page": 7,
+    "type": "Caret",
+    "author": "王颖",
+    "subject": "插入符",
+    "comment": "the",
+    "created": "D:20260722170039+08'00'",
+    "modified": "D:20260722170042+08'00'",
+    "marked_text": "last",
+    "rect": [
+      46.0567,
+      675.99,
+      53.8713,
+      681.46
+    ]
+  },
+  {
+    "page": 7,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "同前",
+    "created": "D:20260722170434+08'00'",
+    "modified": "D:20260722170436+08'00'",
+    "marked_text": "overheated links",
+    "rect": [
+      158.941,
+      384.789,
+      227.324,
+      393.756
+    ]
+  },
+  {
+    "page": 7,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722170653+08'00'",
+    "modified": "D:20260722170653+08'00'",
+    "marked_text": "reliabilityconsidersboththeuniquecomputingnodesusedby",
+    "rect": [
+      167.021,
+      144.643,
+      194.139,
+      153.609
+    ]
+  },
+  {
+    "page": 7,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722170658+08'00'",
+    "modified": "D:20260722170658+08'00'",
+    "marked_text": "thetaskandtheuniquelinkstraversedbyitsinput,dependency",
+    "rect": [
+      113.283,
+      132.688,
+      140.401,
+      141.654
+    ]
+  },
+  {
+    "page": 7,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "指公式中的什么形式？",
+    "created": "D:20260722171035+08'00'",
+    "modified": "D:20260722171051+08'00'",
+    "marked_text": "This weighted form",
+    "rect": [
+      311.978,
+      665.107,
+      394.498,
+      674.073
+    ]
+  },
+  {
+    "page": 7,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "同前面时延模型对应，没有传输推理结果的部分吗？后面解释了，但逻辑上这里应该包含全部，或者把因果的顺序换一下",
+    "created": "D:20260722171240+08'00'",
+    "modified": "D:20260722171434+08'00'",
+    "marked_text": "Thetransmissionenergyincludesinputuploadingandinterme-",
+    "rect": [
+      447.449,
+      451.666,
+      510.154,
+      460.632
+    ]
+  },
+  {
+    "page": 7,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "确认这些特征与前面模型描述的明确呼应",
+    "created": "D:20260722171913+08'00'",
+    "modified": "D:20260722171947+08'00'",
+    "marked_text": "nonlinear reliability products, exponential degrada- tion, reciprocal delay and energy utilities, and dynamic state transitions,",
+    "rect": [
+      311.978,
+      179.019,
+      563.036,
+      211.896
+    ]
+  },
+  {
+    "page": 7,
+    "type": "Caret",
+    "author": "王颖",
+    "subject": "插入符",
+    "comment": "s",
+    "created": "D:20260722172007+08'00'",
+    "modified": "D:20260722172009+08'00'",
+    "marked_text": "Constraint",
+    "rect": [
+      374.793,
+      153.814,
+      382.608,
+      159.284
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722173318+08'00'",
+    "modified": "D:20260722173318+08'00'",
+    "marked_text": "constraint: At each time slot, the CPU resources occupied by all running DNN tasks and the newly accepted task",
+    "rect": [
+      48.964,
+      701.489,
+      300.022,
+      734.446
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "对应于上一个约束条件，这里为何为体现newly accepted tasks",
+    "created": "D:20260722173327+08'00'",
+    "modified": "D:20260722173355+08'00'",
+    "marked_text": "all run- ning DNN tasks",
+    "rect": [
+      48.964,
+      599.498,
+      300.021,
+      620.499
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "1）没有公式编号\n2）用一个完整的公式表达最优化问题？",
+    "created": "D:20260722174146+08'00'",
+    "modified": "D:20260722174408+08'00'",
+    "marked_text": "subjectto(21)–(25)andthedynamicstatetransitionequations.",
+    "rect": [
+      410.249,
+      495.472,
+      560.545,
+      504.438
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "更新",
+    "created": "D:20260722174229+08'00'",
+    "modified": "D:20260722174239+08'00'",
+    "marked_text": "i i T Ui while is used for candidate E scoring, resource-aware variation, local refinement and final preference-based selection.",
+    "rect": [
+      311.978,
+      447.661,
+      563.037,
+      481.963
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "公式31和公式20重复了",
+    "created": "D:20260722174315+08'00'",
+    "modified": "D:20260722174323+08'00'",
+    "marked_text": "(31)",
+    "rect": [
+      546.426,
+      593.778,
+      563.024,
+      602.266
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "公式中两个最小化是否需要替换为相应效用函数的最大化？从行文逻辑上看，否则效用函数的解释就失去必要性了",
+    "created": "D:20260722174447+08'00'",
+    "modified": "D:20260722174536+08'00'",
+    "marked_text": "(32)",
+    "rect": [
+      546.429,
+      512.475,
+      563.027,
+      536.366
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "问题建模阶段是否有必要体现具体的方法？检查前面是否有类似的地方",
+    "created": "D:20260722174550+08'00'",
+    "modified": "D:20260722174618+08'00'",
+    "marked_text": "the evolutionary search evaluates",
+    "rect": [
+      348.47,
+      725.399,
+      485.745,
+      734.366
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "什么意思？",
+    "created": "D:20260722174732+08'00'",
+    "modified": "D:20260722174740+08'00'",
+    "marked_text": "on the current system state.",
+    "rect": [
+      392.476,
+      199.665,
+      505.083,
+      208.632
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "是否需要更新？能耗？",
+    "created": "D:20260722174829+08'00'",
+    "modified": "D:20260722174836+08'00'",
+    "marked_text": "by considering service reliability, inference accuracy and infer- ence delay.",
+    "rect": [
+      311.978,
+      79.8203,
+      563.036,
+      112.698
+    ]
+  },
+  {
+    "page": 8,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "同前",
+    "created": "D:20260722174850+08'00'",
+    "modified": "D:20260722174853+08'00'",
+    "marked_text": "taskpreferencesandtotalenergyconsumption.TofittheDAG",
+    "rect": [
+      379.395,
+      55.9103,
+      498.089,
+      64.8766
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这段描述体现了算法的第二阶段吗？",
+    "created": "D:20260722175016+08'00'",
+    "modified": "D:20260722175030+08'00'",
+    "marked_text": "DAREED incorporates DAG- awareevolutionaryoperators,resource-awaresearchguidance, constraint handling and elite refinement.",
+    "rect": [
+      48.964,
+      701.489,
+      300.022,
+      734.366
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这段是否有必要？",
+    "created": "D:20260722175037+08'00'",
+    "modified": "D:20260722175043+08'00'",
+    "marked_text": "After a DNN request isaccepted,itisregisteredasarunningblockandcontinuously occupies resources for several time slots. The system state is then updated before the next request is processed.",
+    "rect": [
+      48.964,
+      665.634,
+      300.022,
+      710.455
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "同前",
+    "created": "D:20260722175617+08'00'",
+    "modified": "D:20260722175620+08'00'",
+    "marked_text": "the first three",
+    "rect": [
+      109.557,
+      311.953,
+      166.961,
+      320.92
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "同前，是否需要更新",
+    "created": "D:20260722175635+08'00'",
+    "modified": "D:20260722175641+08'00'",
+    "marked_text": "usedforParetoranking,whileUm E",
+    "rect": [
+      148.042,
+      299.416,
+      185.563,
+      308.965
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260722175906+08'00'",
+    "modified": "D:20260722175906+08'00'",
+    "marked_text": "n∈N",
+    "rect": [
+      94.6659,
+      86.5281,
+      109.759,
+      99.0737
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "后面的替换前面的是不是就可以？",
+    "created": "D:20260722175909+08'00'",
+    "modified": "D:20260722180002+08'00'",
+    "marked_text": "n∈N",
+    "rect": [
+      127.448,
+      71.3344,
+      142.541,
+      83.5387
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这一段和前一段的关系是什么？逻辑上略有些模糊，这一段貌似于DAG context没有太大关系？",
+    "created": "D:20260722180233+08'00'",
+    "modified": "D:20260722180441+08'00'",
+    "marked_text": "vi For each layer , j",
+    "rect": [
+      58.927,
+      113.474,
+      131.616,
+      125.722
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这里的topology-aware score和上一段的topology-aware mode是一回事吗？如果不是，这样表述会引起混淆，或者呼应一下小标题的题目？",
+    "created": "D:20260724070034+08'00'",
+    "modified": "D:20260724070208+08'00'",
+    "marked_text": ",thetopology-awarescore",
+    "rect": [
+      462.709,
+      387.463,
+      563.032,
+      399.711
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "这句话会否和下一个机制有所重复？",
+    "created": "D:20260724070320+08'00'",
+    "modified": "D:20260724070333+08'00'",
+    "marked_text": "Different role-based subpopulations use dif- ferent weight vectors to emphasize reliability, latency, energy or feasibility.",
+    "rect": [
+      311.978,
+      236.274,
+      563.036,
+      269.151
+    ]
+  },
+  {
+    "page": 9,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "six or seven？",
+    "created": "D:20260724071433+08'00'",
+    "modified": "D:20260724071439+08'00'",
+    "marked_text": "six",
+    "rect": [
+      423.28,
+      617.909,
+      434.907,
+      626.876
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "layers or tasks?",
+    "created": "D:20260724070929+08'00'",
+    "modified": "D:20260724070937+08'00'",
+    "marked_text": "tasks,",
+    "rect": [
+      232.057,
+      304.493,
+      254.473,
+      313.459
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "什么含义？",
+    "created": "D:20260724071049+08'00'",
+    "modified": "D:20260724071056+08'00'",
+    "marked_text": "the hierarchy violation ratio,",
+    "rect": [
+      144.558,
+      198.668,
+      259.806,
+      207.853
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "是否需要更新？包含能耗？",
+    "created": "D:20260724071336+08'00'",
+    "modified": "D:20260724071347+08'00'",
+    "marked_text": "Z = 3 where",
+    "rect": [
+      332.142,
+      482.964,
+      369.99,
+      492.15
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "同前",
+    "created": "D:20260724071357+08'00'",
+    "modified": "D:20260724071359+08'00'",
+    "marked_text": "inferenceaccuracy,servicereliabilityordelayutility.Thenext-",
+    "rect": [
+      311.978,
+      471.009,
+      520.724,
+      479.975
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "同前",
+    "created": "D:20260724071547+08'00'",
+    "modified": "D:20260724071550+08'00'",
+    "marked_text": "three",
+    "rect": [
+      311.978,
+      327.054,
+      331.893,
+      336.021
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724071653+08'00'",
+    "modified": "D:20260724071653+08'00'",
+    "marked_text": "byconsideringtaskpreferencesandtotalenergyconsumption.",
+    "rect": [
+      441.611,
+      198.264,
+      560.545,
+      207.231
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724071703+08'00'",
+    "modified": "D:20260724071703+08'00'",
+    "marked_text": "Theweightsofinferenceaccuracy,servicereliabilityandinfer- ence delay",
+    "rect": [
+      311.978,
+      174.353,
+      563.036,
+      195.275
+    ]
+  },
+  {
+    "page": 10,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724071747+08'00'",
+    "modified": "D:20260724071747+08'00'",
+    "marked_text": "reliability, inference delay and total energy consumption,respectively.Intheadaptivemode,w issetasa e fixedenergypreferenceandtheremainingweightisdistributed according to the normalized task expectations:",
+    "rect": [
+      311.978,
+      102.622,
+      563.036,
+      147.455
+    ]
+  },
+  {
+    "page": 11,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724072248+08'00'",
+    "modified": "D:20260724072248+08'00'",
+    "marked_text": "←LocalRefine(P",
+    "rect": [
+      385.457,
+      413.927,
+      442.035,
+      424.309
+    ]
+  },
+  {
+    "page": 11,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724072303+08'00'",
+    "modified": "D:20260724072303+08'00'",
+    "marked_text": "Ω(t+1)←AdvanceRunningSet(Ω(t))",
+    "rect": [
+      400.007,
+      605.773,
+      496.595,
+      615.726
+    ]
+  },
+  {
+    "page": 11,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724072327+08'00'",
+    "modified": "D:20260724072327+08'00'",
+    "marked_text": "Θ(t)←UpdateState(G,Ω(t))",
+    "rect": [
+      373.447,
+      629.683,
+      432.635,
+      639.636
+    ]
+  },
+  {
+    "page": 11,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "黄色高亮的函数未体现在文字说明中，检查一下是否影响对伪码的理解",
+    "created": "D:20260724072337+08'00'",
+    "modified": "D:20260724072705+08'00'",
+    "marked_text": "←InitializePopulation(task",
+    "rect": [
+      365.242,
+      534.042,
+      457.944,
+      543.995
+    ]
+  },
+  {
+    "page": 11,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724072345+08'00'",
+    "modified": "D:20260724072345+08'00'",
+    "marked_text": "←Repair(Q",
+    "rect": [
+      376.85,
+      485.725,
+      407.316,
+      497.809
+    ]
+  },
+  {
+    "page": 11,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724072445+08'00'",
+    "modified": "D:20260724072445+08'00'",
+    "marked_text": "Ω(t+1)←AdvanceRunningSet(Ω(t))",
+    "rect": [
+      390.045,
+      269.043,
+      482.767,
+      278.996
+    ]
+  },
+  {
+    "page": 11,
+    "type": "Highlight",
+    "author": "王颖",
+    "subject": "高亮",
+    "comment": "",
+    "created": "D:20260724072451+08'00'",
+    "modified": "D:20260724072451+08'00'",
+    "marked_text": "M←AggregateMetrics(A)",
+    "rect": [
+      356.371,
+      233.178,
+      442.069,
+      243.131
+    ]
+  }
+]

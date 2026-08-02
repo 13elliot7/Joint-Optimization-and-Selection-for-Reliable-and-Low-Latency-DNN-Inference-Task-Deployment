@@ -1,0 +1,38 @@
+Response to Reviewer #1
+
+Reviewer#1, Concern#1: In the Abstract, the manuscript claims to use NSGA-II “to
+optimize both reliability and delay”, but it then explicitly lists service reliability,
+accuracy reliability, and delay as optimization objectives, which is effectively a three-
+objective formulation. Without clarifying that “reliability” is decomposed into service
+and accuracy aspects, this wording may appear internally inconsistent and weaken the
+clarity of the main contribution.
+
+Author response:
+Thanks for pointing out this inconsistency. We have revised the terminology
+throughout the manuscript. The term “accuracy reliability” has been replaced by
+inference accuracy, and the optimization objectives are now consistently stated as
+service reliability, inference accuracy, inference delay, and total energy
+consumption. This avoids mixing service availability and inference quality under an
+ambiguous reliability term.
+
+Author action:
+We revised the Abstract, Introduction, Problem Formulation, Algorithm Design, and
+Performance Analysis sections to use the four objective terms consistently.
+
+Reviewer#1, Concern#2: In Related Work, the manuscript uses strongly judgmental
+phrasing such as “relying on fixed, hand-designed reward weights is outdated” and
+suggests that preference-driven systems can “select the perfect deployment strategy
+instantly”. This tone reads as subjective and promotional.
+
+Author response:
+Thanks for the suggestion. We agree that the previous wording was overly
+promotional. The revised Related Work section now uses neutral, evidence-based
+language. It discusses the limitations of fixed weighted aggregation in dynamic DNN
+inference deployment without using subjective expressions.
+
+Author action:
+We rewrote the Related Work discussion on multi-objective optimization and
+preference-based decision making. The revised text emphasizes that fixed weights are
+difficult to determine under heterogeneous request preferences and time-varying
+system states.
+

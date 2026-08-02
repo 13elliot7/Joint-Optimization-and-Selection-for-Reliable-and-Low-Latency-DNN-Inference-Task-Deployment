@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import itertools
 import json
 import random
 import statistics
@@ -11,20 +12,30 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
 from core.environment import Environment
+from core.topology import TopologyConfig
 from metrics import ExperimentMetrics
 from proposed import AllDNNRefactor
-from rtbl.config import SimulationConfig
 from rtbl.scheduler import RTBLRunner
 
 
-ALGORITHMS = ("random", "maxresource", "localfirst", "proposed", "customized")
-METRIC_FIELDS = (
+PARETO_ALGORITHMS = ("proposed", "customized", "random", "sa")
+DEPLOYMENT_ALGORITHMS = ("proposed", "customized", "random", "localfirst", "maxresource_fast", "rtbl") # maxresource
+ALGORITHMS = tuple(dict.fromkeys((*PARETO_ALGORITHMS, *DEPLOYMENT_ALGORITHMS)))
+BASE_METRIC_FIELDS = (
     "avg_estimated_delay",
-    "avg_dynamic_operation_reliability",
-    "avg_dynamic_accuracy_reliability",
+    "avg_operational_stability_score",
+    "avg_inference_fidelity_score",
     "avg_total_energy",
     "rejected_or_failed_count",
     "runtime_ms",
+)
+PARETO_METRIC_FIELDS = (
+    "pareto_point_count",
+    "pareto_point_count_mean",
+    "pareto_hypervolume",
+    "pareto_hypervolume_sum",
+    "pareto_hypervolume_std",
+    "pareto_postprocess_ms",
 )
 
 
@@ -32,10 +43,10 @@ METRIC_FIELDS = (
 class Scenario:
     suite: str
     name: str
-    dnn_count: int = 20
+    dnn_count: int = 30
     population_size: int = 60
-    iteration_limit: int = 120
-    mutation_probability: float = 0.10
+    iteration_limit: int = 200
+    mutation_probability: float = 0.25
     crossover_probability: float = 0.50
     alpha_r: float = 0.80
     beta_r: float = 0.50
@@ -45,9 +56,20 @@ class Scenario:
     beta_l: float = 0.40
     lambda_h: float = 0.70
     lambda_g: float = 0.70
+    node_stability_weight: float = 0.50
+    link_stability_weight: float = 0.50
+    preference: str = "adaptive"
+    use_dag_aware_initialization: bool = True
+    use_dag_block_crossover: bool = True
+    use_skew_mutation: bool = True
+    use_elite_local_search: bool = True
+    cloud_count: int = 1
+    edge_count: int = 10
+    user_count: int | None = None
+    edge_link_factor: float = 2.0
 
     def environment_kwargs(self) -> Dict[str, float | int | bool]:
-        return {
+        kwargs = {
             "t_max": self.dnn_count,
             "alpha_r": self.alpha_r,
             "beta_r": self.beta_r,
@@ -57,8 +79,25 @@ class Scenario:
             "beta_l": self.beta_l,
             "lambda_h": self.lambda_h,
             "lambda_g": self.lambda_g,
+            "node_stability_weight": self.node_stability_weight,
+            "link_stability_weight": self.link_stability_weight,
             "verbose": False,
         }
+        topology_config = TopologyConfig(
+            cloud_count=self.cloud_count,
+            edge_count=self.edge_count,
+            user_count=self.user_count,
+            edge_link_factor=self.edge_link_factor,
+        )
+        if topology_config != TopologyConfig():
+            kwargs["topology_config"] = topology_config
+        return kwargs
+
+
+@dataclass
+class RunOutput:
+    metrics: ExperimentMetrics
+    pareto_points: List[Dict[str, float | int | str]]
 
 
 def _parse_csv_values(raw: str, value_type):
@@ -76,10 +115,19 @@ def _configure_search(refactor: AllDNNRefactor, scenario: Scenario) -> None:
     refactor.iteration_limit = scenario.iteration_limit
     refactor.mutate_pm = scenario.mutation_probability
     refactor.cross_over_pm = scenario.crossover_probability
+    refactor.preference = scenario.preference
+    refactor.use_dag_aware_initialization = scenario.use_dag_aware_initialization
+    refactor.use_dag_block_crossover = scenario.use_dag_block_crossover
+    refactor.use_skew_mutation = scenario.use_skew_mutation
+    refactor.use_elite_local_search = scenario.use_elite_local_search
+    refactor.collect_pareto_points = scenario.suite == "pareto"
     refactor.function1_values = [0.0 for _ in range(2 * refactor.pop_size)]
     refactor.function2_values = [0.0 for _ in range(2 * refactor.pop_size)]
     refactor.function3_values = [0.0 for _ in range(2 * refactor.pop_size)]
     refactor.function4_values = [0.0 for _ in range(2 * refactor.pop_size)]
+    refactor.estimated_delay_values = [float("inf") for _ in range(2 * refactor.pop_size)]
+    refactor.total_energy_values = [float("inf") for _ in range(2 * refactor.pop_size)]
+    refactor.deadline_feasible_values = [False for _ in range(2 * refactor.pop_size)]
     refactor.constraint_violations = [0.0 for _ in range(2 * refactor.pop_size)]
     refactor.distance = [[0 for _ in range(2 * refactor.pop_size)] for _ in range(1000)]
 
@@ -98,15 +146,142 @@ def _apply_dynamic_parameters(env: Environment, scenario: Scenario) -> None:
         setattr(env, field, getattr(scenario, field))
 
 
-def run_once(algorithm: str, scenario: Scenario, seed: int) -> ExperimentMetrics:
+def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
+    return max(lower, min(upper, value))
+
+
+def _pareto_hypervolume(
+    points: Sequence[Dict[str, float | int | str]],
+    objectives: Sequence[str] = (
+        "inference_fidelity_norm",
+        "operational_stability_norm",
+        "delay_norm",
+        "energy_norm",
+    ),
+) -> float:
+    """Compute hypervolume against zero; fall back to deterministic sampling for large fronts."""
+    feasible_points = [
+        {objective: max(0.0, float(point[objective])) for objective in objectives}
+        for point in points
+    ]
+    if not feasible_points:
+        return 0.0
+    axes = []
+    for objective in objectives:
+        values = sorted({0.0, *(point[objective] for point in feasible_points)})
+        axes.append(values)
+    cell_count = 1
+    for axis in axes:
+        cell_count *= max(len(axis) - 1, 1)
+    if cell_count > 500_000:
+        upper_bounds = [max(point[objective] for point in feasible_points) for objective in objectives]
+        box_volume = 1.0
+        for upper_bound in upper_bounds:
+            box_volume *= upper_bound
+        if box_volume == 0:
+            return 0.0
+        samples = 20_000
+        rng = random.Random(20260613)
+        dominated = 0
+        for _ in range(samples):
+            probe = [rng.random() * upper_bound for upper_bound in upper_bounds]
+            if any(
+                all(point[objective] >= probe[idx] for idx, objective in enumerate(objectives))
+                for point in feasible_points
+            ):
+                dominated += 1
+        return box_volume * dominated / samples
+    hv = 0.0
+    ranges = [range(1, len(axis)) for axis in axes]
+    for indices in itertools.product(*ranges):
+        upper = tuple(axes[dim][idx] for dim, idx in enumerate(indices))
+        if any(
+            all(point[objective] >= upper[idx] for idx, objective in enumerate(objectives))
+            for point in feasible_points
+        ):
+            volume = 1.0
+            for dim, idx in enumerate(indices):
+                volume *= axes[dim][idx] - axes[dim][idx - 1]
+            hv += volume
+    return hv
+
+
+def _group_pareto_points_by_dnn(
+    points: Sequence[Dict[str, float | int | str]],
+) -> Dict[int, List[Dict[str, float | int | str]]]:
+    groups: Dict[int, List[Dict[str, float | int | str]]] = {}
+    for point in points:
+        groups.setdefault(int(point["dnn_index"]), []).append(point)
+    return groups
+
+
+def _normalize_pareto_points(
+    points: Sequence[Dict[str, float | int | str]],
+) -> List[Dict[str, float | int | str]]:
+    """复用搜索阶段的统一满意度表示，不再按算法前沿二次归一化。"""
+    if not points:
+        return []
+    normalized = []
+    for point in points:
+        required = (
+            "inference_fidelity_satisfaction",
+            "operational_stability_satisfaction",
+            "delay_satisfaction",
+            "energy_satisfaction",
+        )
+        missing = [field for field in required if field not in point]
+        if missing:
+            raise ValueError(
+                "Pareto points must use the unified four-objective representation "
+                f"(missing: {', '.join(missing)})"
+            )
+        enriched = dict(point)
+        fidelity = float(point["inference_fidelity_satisfaction"])
+        stability = float(point["operational_stability_satisfaction"])
+        enriched["inference_fidelity_norm"] = _clamp(fidelity)
+        enriched["operational_stability_norm"] = _clamp(stability)
+        enriched["delay_norm"] = _clamp(float(point["delay_satisfaction"]))
+        enriched["energy_norm"] = _clamp(float(point["energy_satisfaction"]))
+        normalized.append(enriched)
+    return normalized
+
+
+def _pareto_hypervolume_by_dnn(
+    points: Sequence[Dict[str, float | int | str]],
+    *,
+    enabled: bool,
+) -> Dict[str, float | str]:
+    if not enabled:
+        raise RuntimeError("Hypervolume is only available in the pareto suite")
+    started_at = __import__("time").monotonic()
+    groups = _group_pareto_points_by_dnn(points)
+    point_counts = [len(group_points) for group_points in groups.values()]
+    hypervolumes = [
+        _pareto_hypervolume(
+            _normalize_pareto_points(group_points),
+            objectives=(
+                "inference_fidelity_norm",
+                "operational_stability_norm",
+                "delay_norm",
+                "energy_norm",
+            ),
+        )
+        for group_points in groups.values()
+    ]
+    return {
+        "pareto_point_count": float(len(points)),
+        "pareto_point_count_mean": statistics.fmean(point_counts) if point_counts else 0.0,
+        "pareto_hypervolume": statistics.fmean(hypervolumes) if hypervolumes else 0.0,
+        "pareto_hypervolume_sum": sum(hypervolumes),
+        "pareto_hypervolume_std": statistics.stdev(hypervolumes) if len(hypervolumes) > 1 else 0.0,
+        "pareto_postprocess_ms": (__import__("time").monotonic() - started_at) * 1000.0,
+        "pareto_hv_version": "4d_unified_v4_global_semantics",
+    }
+
+
+def run_once(algorithm: str, scenario: Scenario, seed: int) -> RunOutput:
     """Run one reproducible algorithm/scenario/seed combination."""
     random.seed(seed)
-    if algorithm == "rtbl":
-        runner = RTBLRunner(SimulationConfig(tMax=scenario.dnn_count))
-        runner.env.verbose = False
-        _apply_dynamic_parameters(runner.env, scenario)
-        return runner.run()
-
     env = Environment(**scenario.environment_kwargs())
     initial_nodes = env.clone_nodes()
     refactor = AllDNNRefactor(env)
@@ -114,11 +289,18 @@ def run_once(algorithm: str, scenario: Scenario, seed: int) -> ExperimentMetrics
     runners = {
         "random": lambda: refactor.run_random(initial_nodes),
         "maxresource": lambda: refactor.run_max_resource(initial_nodes),
+        "maxresource_fast": lambda: refactor.run_max_resource_fast(initial_nodes),
         "localfirst": lambda: refactor.run_local_first(initial_nodes),
+        "rtbl": lambda: RTBLRunner(env).run_dynamic(initial_nodes),
+        "sa": lambda: refactor.run_simulated_annealing(initial_nodes),
         "proposed": refactor.run_proposed,
         "customized": refactor.run_customized_proposed,
     }
-    return runners[algorithm]()
+    metrics = runners[algorithm]()
+    return RunOutput(
+        metrics=metrics,
+        pareto_points=list(refactor.pareto_points) if scenario.suite == "pareto" else [],
+    )
 
 
 def build_scenarios(args: argparse.Namespace) -> List[Scenario]:
@@ -202,10 +384,78 @@ def build_scenarios(args: argparse.Namespace) -> List[Scenario]:
                 )
             )
         return scenarios
+    if args.suite == "ablation":
+        variants = {
+            "full": {},
+            "wo_dag_init": {"use_dag_aware_initialization": False},
+            "wo_block_crossover": {"use_dag_block_crossover": False},
+            "wo_skew_mutation": {"use_skew_mutation": False},
+            "wo_elite_local_search": {"use_elite_local_search": False},
+            "nsga_only": {
+                "use_dag_aware_initialization": False,
+                "use_dag_block_crossover": False,
+                "use_skew_mutation": False,
+                "use_elite_local_search": False,
+            },
+        }
+        return [
+            Scenario(
+                suite="ablation",
+                name=name,
+                dnn_count=args.dnn_count,
+                population_size=args.population_size,
+                iteration_limit=args.iteration_limit,
+                **settings,
+            )
+            for name, settings in variants.items()
+        ]
+    if args.suite == "pareto":
+        return [
+            Scenario(
+                suite="pareto",
+                name=f"dnn_{args.dnn_count}",
+                dnn_count=args.dnn_count,
+                population_size=args.population_size,
+                iteration_limit=args.iteration_limit,
+            )
+        ]
+    if args.suite == "scale":
+        scales = {
+            "small": dict(edge_count=10, user_count=30, dnn_count=args.small_dnn_count),
+            "medium": dict(edge_count=30, user_count=120, dnn_count=args.medium_dnn_count),
+            "large": dict(edge_count=60, user_count=300, dnn_count=args.large_dnn_count),
+        }
+        return [
+            Scenario(
+                suite="scale",
+                name=name,
+                population_size=args.population_size,
+                iteration_limit=args.iteration_limit,
+                **settings,
+            )
+            for name, settings in scales.items()
+        ]
+    if args.suite == "preference":
+        return [
+            Scenario(
+                suite="preference",
+                name=preference,
+                dnn_count=args.dnn_count,
+                population_size=args.population_size,
+                iteration_limit=args.iteration_limit,
+                preference=preference,
+            )
+            for preference in (
+                "delay_sensitive",
+                "stability_sensitive",
+                "energy_sensitive",
+                "balanced",
+            )
+        ]
     raise ValueError(f"unsupported suite: {args.suite}")
 
 
-def _result_row(algorithm: str, scenario: Scenario, repeat: int, seed: int, metrics: ExperimentMetrics) -> Dict[str, object]:
+def _result_row(algorithm: str, scenario: Scenario, repeat: int, seed: int, output: RunOutput) -> Dict[str, object]:
     row: Dict[str, object] = {
         "task_id": f"{_scenario_key(scenario)}:{algorithm}:repeat_{repeat}:seed_{seed}",
         "suite": scenario.suite,
@@ -215,7 +465,14 @@ def _result_row(algorithm: str, scenario: Scenario, repeat: int, seed: int, metr
         "seed": seed,
         "scenario_parameters": json.dumps(asdict(scenario), sort_keys=True),
     }
-    row.update(dict(metrics.to_report_rows()))
+    row.update(dict(output.metrics.to_report_rows()))
+    row["result_schema_version"] = "semantic_names_v4_global"
+    if algorithm == "rtbl":
+        row["metric_version"] = "post_admission_v1"
+    if scenario.suite == "pareto":
+        if algorithm not in PARETO_ALGORITHMS:
+            raise ValueError(f"algorithm {algorithm!r} does not export a Pareto front")
+        row.update(_pareto_hypervolume_by_dnn(output.pareto_points, enabled=True))
     return row
 
 
@@ -226,14 +483,213 @@ def _read_completed(path: Path) -> set[str]:
         return {row["task_id"] for row in csv.DictReader(stream)}
 
 
+def _validate_existing_result_schema(raw_path: Path, suite: str) -> None:
+    """Prevent silently appending incompatible 3D/4D or Pareto/non-Pareto rows."""
+    if not raw_path.exists():
+        return
+    with raw_path.open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        fieldnames = set(reader.fieldnames or [])
+        rows = list(reader)
+    pareto_fields = {field for field in fieldnames if field.startswith("pareto_")}
+    if suite == "pareto":
+        required = {"pareto_hv_version", *PARETO_METRIC_FIELDS}
+        missing = sorted(required - fieldnames)
+        if missing:
+            raise RuntimeError(
+                f"{raw_path} uses an incompatible Pareto result schema "
+                f"(missing: {', '.join(missing)}). Use a fresh output directory "
+                "or archive the legacy 3D-HV results before running 4D-HV experiments."
+            )
+        invalid_versions = {
+            row.get("pareto_hv_version", "")
+            for row in rows
+            if row.get("pareto_hv_version", "") != "4d_unified_v4_global_semantics"
+        }
+        if invalid_versions:
+            raise RuntimeError(
+                f"{raw_path} contains incompatible Pareto rows. Use a fresh output "
+                "directory or archive the legacy results."
+            )
+    elif pareto_fields:
+        raise RuntimeError(
+            f"{raw_path} contains Pareto-only fields in the {suite!r} suite. "
+            "Use a fresh output directory so non-Pareto runtime results remain HV-free."
+        )
+    required_semantics = "stability_fidelity_v2_return_energy"
+    if "objective_semantics_version" not in fieldnames or any(
+        row.get("objective_semantics_version", "") != required_semantics
+        for row in rows
+    ):
+        raise RuntimeError(
+            f"{raw_path} does not use {required_semantics!r} objective semantics. "
+            "Use a fresh output directory or archive the legacy product-based results."
+        )
+    if "result_schema_version" not in fieldnames or any(
+        row.get("result_schema_version", "") != "semantic_names_v4_global"
+        for row in rows
+    ):
+        raise RuntimeError(
+            f"{raw_path} does not use the semantic_names_v4_global result schema. "
+            "Migrate the legacy CSV or use a fresh output directory."
+        )
+
+
+def _validate_existing_pareto_points_schema(path: Path) -> None:
+    if not path.exists():
+        return
+    with path.open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        fieldnames = set(reader.fieldnames or [])
+        rows = list(reader)
+    required = {
+        "total_energy",
+        "inference_fidelity",
+        "operational_stability",
+        "inference_fidelity_satisfaction",
+        "operational_stability_satisfaction",
+        "delay_satisfaction",
+        "energy_satisfaction",
+        "energy_norm",
+        "inference_fidelity_norm",
+        "operational_stability_norm",
+        "pareto_hv_version",
+        "objective_semantics_version",
+        "result_schema_version",
+    }
+    missing = sorted(required - fieldnames)
+    invalid_version = any(
+        row.get("pareto_hv_version", "") != "4d_unified_v4_global_semantics"
+        or row.get("result_schema_version", "") != "semantic_names_v4_global"
+        for row in rows
+    )
+    if missing or invalid_version:
+        detail = (
+            f"missing: {', '.join(missing)}"
+            if missing
+            else "non-4d_unified_v4_global_semantics rows"
+        )
+        raise RuntimeError(
+            f"{path} uses an incompatible Pareto-point schema ({detail}). "
+            "Use a fresh output directory or archive the legacy 3D-HV points."
+        )
+
+
 def _append_row(path: Path, row: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not path.exists()
+    if path.exists():
+        with path.open(newline="", encoding="utf-8") as stream:
+            reader = csv.DictReader(stream)
+            existing_fieldnames = list(reader.fieldnames or [])
+            existing_rows = list(reader)
+        missing_fieldnames = [field for field in row if field not in existing_fieldnames]
+        if missing_fieldnames:
+            fieldnames = [*existing_fieldnames, *missing_fieldnames]
+            with path.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.DictWriter(stream, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(existing_rows)
+        else:
+            fieldnames = existing_fieldnames
+    else:
+        fieldnames = list(row)
     with path.open("a", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(row))
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
         if write_header:
             writer.writeheader()
         writer.writerow(row)
+
+
+def _append_pareto_points(
+    path: Path,
+    task_id: str,
+    algorithm: str,
+    scenario: Scenario,
+    repeat: int,
+    seed: int,
+    points: Sequence[Dict[str, float | int | str]],
+) -> None:
+    if not points:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "task_id",
+        "suite",
+        "scenario",
+        "algorithm",
+        "repeat",
+        "seed",
+        "dnn_index",
+        "individual_index",
+        "inference_fidelity",
+        "operational_stability",
+        "delay_utility",
+        "total_energy",
+        "inference_fidelity_satisfaction",
+        "operational_stability_satisfaction",
+        "energy_satisfaction",
+        "estimated_delay",
+        "deadline",
+        "delay_satisfaction",
+        "inference_fidelity_norm",
+        "operational_stability_norm",
+        "delay_norm",
+        "energy_norm",
+        "pareto_hv_version",
+        "objective_semantics_version",
+        "result_schema_version",
+    ]
+    write_header = not path.exists()
+    if path.exists():
+        with path.open(newline="", encoding="utf-8") as stream:
+            reader = csv.DictReader(stream)
+            existing_fieldnames = list(reader.fieldnames or [])
+            existing_rows = list(reader)
+        missing_fieldnames = [field for field in fieldnames if field not in existing_fieldnames]
+        if missing_fieldnames:
+            fieldnames = [*existing_fieldnames, *missing_fieldnames]
+            with path.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.DictWriter(stream, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(existing_rows)
+    normalized_points: List[Dict[str, float | int | str]] = []
+    for group_points in _group_pareto_points_by_dnn(points).values():
+        normalized_points.extend(_normalize_pareto_points(group_points))
+    with path.open("a", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        if write_header:
+            writer.writeheader()
+        for point in normalized_points:
+            writer.writerow(
+                {
+                    "task_id": task_id,
+                    "suite": scenario.suite,
+                    "scenario": scenario.name,
+                    "algorithm": algorithm,
+                    "repeat": repeat,
+                    "seed": seed,
+                    "dnn_index": point["dnn_index"],
+                    "individual_index": point["individual_index"],
+                    "inference_fidelity": point["inference_fidelity"],
+                    "operational_stability": point["operational_stability"],
+                    "delay_utility": point["delay_utility"],
+                    "total_energy": point["total_energy"],
+                    "inference_fidelity_satisfaction": point["inference_fidelity_satisfaction"],
+                    "operational_stability_satisfaction": point["operational_stability_satisfaction"],
+                    "energy_satisfaction": point["energy_satisfaction"],
+                    "estimated_delay": point.get("estimated_delay", ""),
+                    "deadline": point.get("deadline", ""),
+                    "delay_satisfaction": point.get("delay_satisfaction", ""),
+                    "inference_fidelity_norm": point["inference_fidelity_norm"],
+                    "operational_stability_norm": point["operational_stability_norm"],
+                    "delay_norm": point["delay_norm"],
+                    "energy_norm": point["energy_norm"],
+                    "pareto_hv_version": "4d_unified_v4_global_semantics",
+                    "objective_semantics_version": "stability_fidelity_v2_return_energy",
+                    "result_schema_version": "semantic_names_v4_global",
+                }
+            )
 
 
 def _mean(values: Sequence[float]) -> float:
@@ -244,17 +700,23 @@ def _std(values: Sequence[float]) -> float:
     return statistics.stdev(values) if len(values) > 1 else 0.0
 
 
-def write_summary(raw_path: Path, summary_path: Path) -> None:
+def write_summary(raw_path: Path, summary_path: Path, algorithms: Sequence[str] | None = None) -> None:
+    allowed_algorithms = set(algorithms or [])
     with raw_path.open(newline="", encoding="utf-8") as stream:
-        rows = list(csv.DictReader(stream))
+        rows = [
+            row for row in csv.DictReader(stream)
+            if not allowed_algorithms or row["algorithm"] in allowed_algorithms
+        ]
     groups: Dict[tuple[str, str, str], List[Dict[str, str]]] = {}
     for row in rows:
         key = (row["suite"], row["scenario"], row["algorithm"])
         groups.setdefault(key, []).append(row)
 
     summary_path.parent.mkdir(parents=True, exist_ok=True)
+    is_pareto = bool(rows) and all(row["suite"] == "pareto" for row in rows)
+    metric_fields = BASE_METRIC_FIELDS + (PARETO_METRIC_FIELDS if is_pareto else ())
     fields = ["suite", "scenario", "algorithm", "runs"]
-    for metric in METRIC_FIELDS:
+    for metric in metric_fields:
         fields.extend((f"{metric}_mean", f"{metric}_std"))
     with summary_path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
@@ -266,7 +728,7 @@ def write_summary(raw_path: Path, summary_path: Path) -> None:
                 "algorithm": algorithm,
                 "runs": len(group_rows),
             }
-            for metric in METRIC_FIELDS:
+            for metric in metric_fields:
                 values = [float(row[metric]) for row in group_rows]
                 result[f"{metric}_mean"] = _mean(values)
                 result[f"{metric}_std"] = _std(values)
@@ -280,7 +742,16 @@ def run_experiments(
     base_seed: int,
     output_dir: Path,
 ) -> None:
+    scenarios = list(scenarios)
+    suites = {scenario.suite for scenario in scenarios}
+    if len(suites) > 1:
+        raise ValueError("one output directory may contain only one experiment suite")
+    suite = next(iter(suites), "")
     raw_path = output_dir / "raw_results.csv"
+    pareto_path = output_dir / "pareto_points.csv"
+    _validate_existing_result_schema(raw_path, suite)
+    if suite == "pareto":
+        _validate_existing_pareto_points_schema(pareto_path)
     completed = _read_completed(raw_path)
     for scenario in scenarios:
         for repeat in range(repeats):
@@ -291,29 +762,38 @@ def run_experiments(
                     print(f"[skip] {task_id}")
                     continue
                 print(f"[run] {task_id}")
-                metrics = run_once(algorithm, scenario, seed)
-                _append_row(raw_path, _result_row(algorithm, scenario, repeat, seed, metrics))
+                output = run_once(algorithm, scenario, seed)
+                _append_row(raw_path, _result_row(algorithm, scenario, repeat, seed, output))
+                if scenario.suite == "pareto" and algorithm in PARETO_ALGORITHMS:
+                    _append_pareto_points(pareto_path, task_id, algorithm, scenario, repeat, seed, output.pareto_points)
                 completed.add(task_id)
     write_summary(raw_path, output_dir / "summary.csv")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Reproducible batch experiments for DNN deployment algorithms")
-    parser.add_argument("--suite", choices=("overall", "dynamic", "sensitivity"), required=True)
+    parser.add_argument(
+        "--suite",
+        choices=("overall", "dynamic", "sensitivity", "ablation", "pareto", "scale", "preference"),
+        required=True,
+    )
     parser.add_argument(
         "--algorithms",
         help="comma-separated algorithms; defaults depend on the selected suite",
     )
     parser.add_argument("--repeats", type=int, default=10)
-    parser.add_argument("--base-seed", type=int, default=20260613)
+    parser.add_argument("--base-seed", type=int, default=20260719)
     parser.add_argument("--output-dir", type=Path, default=Path("experiment_results"))
-    parser.add_argument("--dnn-count", type=int, default=20)
+    parser.add_argument("--dnn-count", type=int, default=30)
     parser.add_argument("--dnn-counts", default="5,10,20,30,40")
     parser.add_argument("--population-size", type=int, default=60)
-    parser.add_argument("--iteration-limit", type=int, default=120)
+    parser.add_argument("--iteration-limit", type=int, default=200)
     parser.add_argument("--population-sizes", default="20,40,60,80,100")
-    parser.add_argument("--iteration-limits", default="30,60,120,180")
-    parser.add_argument("--mutation-probabilities", default="0.05,0.10,0.20,0.30")
+    parser.add_argument("--iteration-limits", default="80,120,160,200,240,280")
+    parser.add_argument("--mutation-probabilities", default="0.10,0.15,0.20,0.25,0.30,0.35")
+    parser.add_argument("--small-dnn-count", type=int, default=20)
+    parser.add_argument("--medium-dnn-count", type=int, default=60)
+    parser.add_argument("--large-dnn-count", type=int, default=120)
     return parser
 
 
@@ -321,9 +801,13 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     default_algorithms = {
-        "overall": list(ALGORITHMS),
-        "dynamic": [algorithm for algorithm in ALGORITHMS if algorithm != "rtbl"],
-        "sensitivity": ["proposed", "customized"],
+        "overall": list(DEPLOYMENT_ALGORITHMS),
+        "dynamic": list(DEPLOYMENT_ALGORITHMS),
+        "sensitivity": ["customized"],
+        "ablation": ["customized"],
+        "pareto": list(PARETO_ALGORITHMS),
+        "scale": list(DEPLOYMENT_ALGORITHMS),
+        "preference": ["customized"],
     }
     args.algorithms = (
         _parse_csv_values(args.algorithms, str)

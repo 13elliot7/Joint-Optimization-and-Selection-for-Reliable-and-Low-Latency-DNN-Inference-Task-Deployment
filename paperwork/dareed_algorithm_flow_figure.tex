@@ -1,0 +1,6 @@
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=0.95\textwidth]{experiment_figures/dareed_algorithm_flow.svg}
+    \caption{Overview of the proposed DAREED algorithm. For each online DNN inference request, DAREED observes the dynamic cloud-edge-end state, constructs the DAG context, predicts candidate post-admission states, and performs four-objective evolutionary search over inference accuracy, service reliability, delay and raw total energy. A strictly feasible deployment is selected according to the request preference, registered as a running block and revalidated before admission. Pareto-front export and four-dimensional hypervolume are enabled only in the dedicated Pareto experiment.}
+    \label{fig:dareed_algorithm_flow}
+\end{figure*}

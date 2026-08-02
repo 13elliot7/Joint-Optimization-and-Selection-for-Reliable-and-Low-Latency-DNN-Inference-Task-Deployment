@@ -12,16 +12,19 @@ class SOTASelector:
         self.v = v
 
     def compute_f1(self, selected: Set[int], a_j: List[float], rj_tilde: List[float]) -> float:
-        """计算已选节点集合的精度与可靠性联合收益。"""
+        """计算已选节点集合的保真度与可用性联合收益。"""
         if not selected:
             return 0.0
-        acc = 0.0
-        reliability = 1.0
+        fidelity_benefit = 0.0
+        availability_complement = 1.0
         for j in selected:
-            acc = max(acc, self.lambda_a * a_j[j] * rj_tilde[j])
-            reliability *= 1 - rj_tilde[j]
-        reliability = 1 - reliability
-        return self.v * (acc + self.lambda_r * reliability)
+            fidelity_benefit = max(
+                fidelity_benefit,
+                self.lambda_a * a_j[j] * rj_tilde[j],
+            )
+            availability_complement *= 1 - rj_tilde[j]
+        availability = 1 - availability_complement
+        return self.v * (fidelity_benefit + self.lambda_r * availability)
 
     def compute_f2(self, selected: Iterable[int], q: float, d_j: List[float]) -> float:
         """计算已选节点集合带来的时延代价。"""

@@ -19,18 +19,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Python refactor for src_backup_origin")
     parser.add_argument(
         "--algorithm",
-        choices=["proposed", "customized", "random", "maxresource", "localfirst", "rtbl", "all"],
+        choices=["proposed", "customized", "random", "maxresource", "maxresource_fast", "localfirst", "rtbl", "sa", "all"],
         default="all",
     )
     parser.add_argument("--tmax", type=int, default=40)
-    parser.add_argument("--iteration-limit", type=int, default=120)
+    parser.add_argument("--iteration-limit", type=int, default=200)
     parser.add_argument("--quiet", action="store_true", help="只输出最终实验指标")
     args = parser.parse_args()
-
-    if args.algorithm == "rtbl":
-        metrics = RTBLRunner().run()
-        print_metrics("RTBL", metrics)
-        return
 
     env = Environment(t_max=args.tmax, verbose=not args.quiet)
     refactor = AllDNNRefactor(env)
@@ -49,8 +44,17 @@ def main() -> None:
     if args.algorithm == "maxresource":
         print_metrics("MAXRESOURCE", refactor.run_max_resource(initial_nodes))
         return
+    if args.algorithm == "maxresource_fast":
+        print_metrics("MAXRESOURCE_FAST", refactor.run_max_resource_fast(initial_nodes))
+        return
     if args.algorithm == "localfirst":
         print_metrics("LOCALFIRST", refactor.run_local_first(initial_nodes))
+        return
+    if args.algorithm == "rtbl":
+        print_metrics("RTBL", RTBLRunner(env).run_dynamic(initial_nodes))
+        return
+    if args.algorithm == "sa":
+        print_metrics("SA", refactor.run_simulated_annealing(initial_nodes))
         return
 
 
@@ -62,8 +66,13 @@ def main() -> None:
     env.reset_nodes(initial_nodes)
     print_metrics("MAXRESOURCE", refactor.run_max_resource(initial_nodes))
     env.reset_nodes(initial_nodes)
+    print_metrics("MAXRESOURCE_FAST", refactor.run_max_resource_fast(initial_nodes))
+    env.reset_nodes(initial_nodes)
     print_metrics("LOCALFIRST", refactor.run_local_first(initial_nodes))
-    print_metrics("RTBL", RTBLRunner().run())
+    env.reset_nodes(initial_nodes)
+    print_metrics("RTBL", RTBLRunner(env).run_dynamic(initial_nodes))
+    env.reset_nodes(initial_nodes)
+    print_metrics("SA", refactor.run_simulated_annealing(initial_nodes))
 
 
 if __name__ == "__main__":

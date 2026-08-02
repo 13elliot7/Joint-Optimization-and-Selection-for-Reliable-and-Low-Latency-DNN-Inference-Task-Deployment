@@ -1,0 +1,37 @@
+algorithms use the same normalization method and the same reference point. The final
+hypervolume is averaged over DNN requests, and standard deviation is reported.
+
+Author action:
+We revised the Metrics and Comparison Methods subsection in Section 6 to define
+the normalized objective space and the hypervolume reference point.
+
+Reviewer#1, Concern#11: Many key parameters are randomly selected within ranges,
+but the manuscript does not specify how many random instances were generated,
+whether results are averaged over multiple seeds, or what variability measure is used.
+
+Author response:
+Thanks for the suggestion. We have revised the experimental setup to state that
+experiments are repeated under different random seeds. The revised result tables are
+designed to report mean values and standard deviations.
+
+Author action:
+We revised Section 6 to include repeated experiments, random-seed settings, and
+standard-deviation reporting in Pareto quality and performance tables.
+
+Reviewer#1, Concern#12: Baselines LB and LPD are single-policy heuristics rather
+than multi-objective methods. The manuscript could better contextualize percentage
+improvements and discuss limitations of these baselines.
+
+Author response:
+Thanks for the suggestion. We have expanded the comparison methods. The revised
+experiments include not only simple heuristic baselines, but also a generic NSGA-II
+based evolutionary deployment algorithm, simulated annealing, random feasible
+deployment, maximum-resource deployment, local-first deployment, and RTBL, a
+reliability-aware task scheduling method based on Lyapunov optimization and bandit
+learning. We also clarify that single-policy heuristics are included as interpretable
+references rather than as complete multi-objective competitors.
+
+Author action:
+We revised Section 6 to add a comparison algorithm table and to separate Pareto-front
+quality evaluation from final online deployment performance evaluation.
+

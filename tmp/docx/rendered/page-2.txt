@@ -1,0 +1,36 @@
+Response to Associate Editor
+
+Associate Editor Comment: The manuscript requires major revision. The key
+concerns include insufficient algorithmic novelty, unrealistic modeling assumptions,
+unclear mathematical formulations, weak experimental evaluation, and writing quality
+issues. The authors are also encouraged to consider additional optimization objectives
+such as energy consumption and cost, and to test the framework under larger and
+more dynamic network conditions.
+
+Author response:
+Thanks for the editor’s summary and guidance. We have conducted a major revision
+to address these issues systematically.
+
+First, the system model has been redesigned from a static node-reliability model to a
+dynamic cloud-edge-end inference model. The revised model captures online DNN
+request arrivals, running task blocks, time-varying node and link load, heat
+accumulation, dynamic node reliability, dynamic link reliability, inference accuracy,
+critical-path inference delay, and total energy consumption.
+
+Second, the algorithm has been redesigned and renamed as DAREED. Rather than
+directly applying a generic NSGA-II framework, DAREED embeds DNN DAG
+information and dynamic resource states into initialization, crossover, mutation,
+repair, constraint-dominance sorting, elite local search, and final preference-based
+selection.
+
+Third, the experimental design has been expanded. The revised performance analysis
+includes state-of-the-art and stronger baselines, repeated random-seed experiments
+with standard deviation reporting, Pareto-front quality metrics, scalability tests,
+dynamic degradation tests, cloud-side stress tests, and ablation studies.
+
+Author action:
+We revised the Abstract, Introduction, Motivation, Problem Formulation, Algorithm
+Design, Performance Analysis, Related Work, and Conclusion sections accordingly.
+We also proofread the manuscript to improve terminology consistency and writing
+quality.
+

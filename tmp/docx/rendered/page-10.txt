@@ -1,0 +1,17 @@
+Reviewer#2, Concern#7: The paper only considers reliability and delay as
+optimization objectives, but does not consider energy consumption or cost.
+
+Author response:
+Thanks for the suggestion. We have incorporated total energy consumption as an
+optimization objective. The revised energy model includes computation energy and
+transmission energy. DAREED uses energy utility in candidate scoring, mutation
+guidance, local search, and final deployment selection. We did not include monetary
+cost as a primary objective in this revision because cloud-edge-end pricing models
+vary significantly across platforms, while energy consumption is directly measurable
+and closely related to resource efficiency.
+
+Author action:
+We revised Section 4 to add the total energy consumption model and objective. We
+revised Section 5 and Section 6 to include energy-aware algorithm mechanisms and
+energy-related performance metrics.
+

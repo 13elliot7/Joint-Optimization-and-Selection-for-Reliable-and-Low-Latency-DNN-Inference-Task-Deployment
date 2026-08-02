@@ -1,0 +1,8 @@
+future extension, the revised model captures the dynamic resource and reliability
+fluctuations caused by online workloads and background contention.
+
+Author action:
+We revised Section 4 to include dynamic bandwidth, dynamic link reliability,
+node/link load, heat evolution, and state transition. We added dynamic degradation
+and cloud-side stress experiments in Section 6.
+

@@ -1,0 +1,35 @@
+Original Manuscript ID: TSC-2025-01-0005
+
+Original Article Title: “Multi-Objective DNN Inference Task Deployment for
+Reliability and Delay”
+
+To: IEEE TSC Editor
+
+Re: Response to reviewers
+
+Dear Editor,
+
+We thank you and the reviewers for the constructive comments and for the
+opportunity to revise our manuscript. We have carefully studied all comments and
+have substantially revised the manuscript in terms of system modeling, algorithm
+design, experimental evaluation, related work, and writing quality.
+
+In the revised manuscript, the deployment problem is reformulated for dynamic
+cloud-edge-end DNN inference. The revised model considers DAG-structured
+inference dependencies, time-varying node and link states, dynamic service reliability,
+inference accuracy, inference delay, and total energy consumption. We also redesign
+the algorithm as DAREED: DAG-Aware Reliable and Energy-Efficient
+Evolutionary Deployment algorithm, which incorporates DAG-aware evolutionary
+operators, resource-aware variation, constraint-aware selection, elite refinement, and
+preference-based deployment selection. The performance analysis section has been
+expanded with parameter sensitivity, Pareto quality, overall online deployment
+performance, cloud-side stress tests, dynamic degradation tests, ablation studies,
+scalability evaluation, and application preference scenarios.
+
+The comments are reproduced below, followed by our point-by-point responses and
+corresponding actions.
+
+Best regards,
+
+Ying Wang, Huang Lianze, Wei Junjie et al.
+

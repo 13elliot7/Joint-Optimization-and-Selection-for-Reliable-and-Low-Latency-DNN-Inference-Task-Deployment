@@ -1,0 +1,43 @@
+Reviewer#3, Concern#3: The final selection algorithm uses a simple linear weighted
+sum, which degrades the multi-objective optimization back into a single-objective
+problem. If weights are known, why compute the Pareto front?
+
+Author response:
+Thanks for raising this important point. In the revised DAREED framework, Pareto
+search and final selection play different roles. The evolutionary stage generates a
+diverse non-dominated candidate set without fixing objective weights during
+candidate generation. The preference-based selection stage is then applied only after
+the candidate set has been obtained, so different DNN requests can select different
+deployment schemes from the same type of Pareto representation according to their
+service preferences. This preserves multi-objective exploration while allowing
+concrete online deployment decisions.
+
+Author action:
+We revised Section 5 to clarify the two-stage framework of evolutionary candidate
+search and preference-based deployment selection. We also added application
+preference experiments in Section 6.
+
+Reviewer#3, Concern#4: Assuming that service reliability remains constant during
+task execution is highly unrealistic for mobile edge environments.
+
+Author response:
+Thanks for the comment. We agree and have revised the model. The revised model
+represents service reliability as a dynamic variable affected by node load and heat.
+Since accepted DNN requests occupy resources for several time slots, subsequent
+deployment decisions are made under updated reliability and resource states.
+
+Author action:
+We revised Section 4 to include dynamic node reliability and dynamic state transition,
+and we added dynamic degradation experiments in Section 6.
+
+Reviewer#3, Concern#5: The reliability calculation multiplies assigned node
+reliabilities and assumes independent subtask failures. If multiple layers are deployed
+on the same node, failure of that node causes all subtasks to fail simultaneously.
+
+Author response:
+Thanks for pointing out this logical issue. We have revised the reliability formulation.
+The service reliability of a DNN request is now calculated over unique used
+computing nodes and traversed communication links. Thus, a node used by multiple
+DNN layers contributes only once to service reliability, which better captures
+correlated failures among layers deployed on the same node.
+
