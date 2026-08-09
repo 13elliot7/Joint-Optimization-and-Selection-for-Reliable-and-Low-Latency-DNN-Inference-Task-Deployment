@@ -1,0 +1,86 @@
+{
+  "manifest_version": "converged_experiment_manifest_v1",
+  "experiment_layer": "search_quality",
+  "suite": "search_quality",
+  "scenario_count": 4,
+  "scenario_hashes": [
+    "702a70b8c5d05eb4",
+    "ff6667e8f9373c08",
+    "ad3df0285d4ac131",
+    "211e84e173c8b908"
+  ],
+  "scenario_definitions": [
+    {
+      "name": "customized_medium",
+      "method": "customized",
+      "evidence_roles": [
+        "budget",
+        "algorithm",
+        "operator"
+      ],
+      "population_size": 12,
+      "generations": 4,
+      "archive_capacity": 64,
+      "instance_count": 30,
+      "use_dag_aware_initialization": true,
+      "use_dag_block_crossover": true,
+      "use_skew_mutation": true,
+      "use_elite_local_search": true
+    },
+    {
+      "name": "proposed_medium",
+      "method": "proposed",
+      "evidence_roles": [
+        "algorithm",
+        "operator"
+      ],
+      "population_size": 12,
+      "generations": 4,
+      "archive_capacity": 64,
+      "instance_count": 30,
+      "use_dag_aware_initialization": false,
+      "use_dag_block_crossover": false,
+      "use_skew_mutation": false,
+      "use_elite_local_search": false
+    },
+    {
+      "name": "sa_medium",
+      "method": "sa",
+      "evidence_roles": [
+        "algorithm"
+      ],
+      "population_size": 12,
+      "generations": 4,
+      "archive_capacity": 64,
+      "instance_count": 30,
+      "use_dag_aware_initialization": true,
+      "use_dag_block_crossover": true,
+      "use_skew_mutation": true,
+      "use_elite_local_search": true
+    },
+    {
+      "name": "no_dag_medium",
+      "method": "no_dag_operators",
+      "evidence_roles": [
+        "operator"
+      ],
+      "population_size": 12,
+      "generations": 4,
+      "archive_capacity": 64,
+      "instance_count": 30,
+      "use_dag_aware_initialization": false,
+      "use_dag_block_crossover": false,
+      "use_skew_mutation": false,
+      "use_elite_local_search": true
+    }
+  ],
+  "repeats": 20,
+  "base_seed": 20260719,
+  "timing_mode": "measured",
+  "semantic_versions": {
+    "objective_semantics_version": "stability_delay_energy_v4"
+  },
+  "formal": false,
+  "git_revision": "6e50e08aaeef712c1154d15a02149aefc11d1485",
+  "created_at": "2026-08-09T03:52:55.995022+00:00"
+}

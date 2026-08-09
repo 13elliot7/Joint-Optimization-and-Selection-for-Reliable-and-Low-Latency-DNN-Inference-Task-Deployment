@@ -9,7 +9,6 @@ class SimulationConfig:
     r_min: float = 0.70
     r_max: float = 0.99
     D_bug: float = 1000.0
-    lambda_a: float = 1.0
     lambda_r: float = 10.0
     H_off: int = 100
     V_range: float = 200.0

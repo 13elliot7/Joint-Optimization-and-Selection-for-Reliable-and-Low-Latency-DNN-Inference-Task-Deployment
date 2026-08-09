@@ -1,0 +1,23 @@
+{
+  "manifest_version": "converged_experiment_manifest_v1",
+  "experiment_layer": "search_quality",
+  "suite": "search_quality",
+  "scenario_count": 6,
+  "scenario_hashes": [
+    "288c7bb08423b546",
+    "702a70b8c5d05eb4",
+    "ef7e639308958c8d",
+    "ff6667e8f9373c08",
+    "ad3df0285d4ac131",
+    "211e84e173c8b908"
+  ],
+  "repeats": 20,
+  "base_seed": 20260719,
+  "timing_mode": "measured",
+  "semantic_versions": {
+    "objective_semantics_version": "stability_delay_energy_v4"
+  },
+  "formal": false,
+  "git_revision": "6e50e08aaeef712c1154d15a02149aefc11d1485",
+  "created_at": "2026-08-09T02:36:30.538463+00:00"
+}

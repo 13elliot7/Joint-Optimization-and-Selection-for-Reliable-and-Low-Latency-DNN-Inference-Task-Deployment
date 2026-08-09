@@ -14,7 +14,6 @@ from typing import Callable, Dict, Iterable, List, Sequence
 DEFAULT_METRICS = (
     "avg_estimated_delay",
     "avg_operational_stability_score",
-    "avg_inference_fidelity_score",
     "avg_total_energy",
     "rejected_or_failed_count",
     "runtime_ms",
@@ -374,11 +373,11 @@ def scatter_chart(rows: Sequence[Dict[str, str]], x_metric: str, y_metric: str, 
 
 def pareto_3d_chart(rows: Sequence[Dict[str, str]], output_path: Path) -> None:
     normalized_metrics = (
-        "inference_fidelity_norm",
         "operational_stability_norm",
         "delay_norm",
+        "energy_norm",
     )
-    raw_metrics = ("inference_fidelity", "operational_stability", "delay_utility")
+    raw_metrics = ("operational_stability", "delay_utility", "total_energy")
     if all(any(row.get(metric) not in (None, "") for row in rows) for metric in normalized_metrics):
         x_metric, y_metric, z_metric = normalized_metrics
         x_max = y_max = z_max = 1.0
@@ -511,8 +510,8 @@ def plot_suite(suite_dir: Path, output_dir: Path, metrics: Sequence[str]) -> Lis
     if pareto_rows:
         scatter_specs = (
             ("delay_utility", "operational_stability"),
-            ("delay_utility", "inference_fidelity"),
-            ("operational_stability", "inference_fidelity"),
+            ("energy_satisfaction", "operational_stability"),
+            ("delay_utility", "energy_satisfaction"),
         )
         for x_metric, y_metric in scatter_specs:
             path = output_dir / suite / f"pareto_{x_metric}_vs_{y_metric}.svg"

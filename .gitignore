@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Superseded experiment output roots. New runs use results/ only.
+/experiment_results/
+/periodic_experiment_results/
+/periodic_experiment_results_v2/
+/periodic_experiment_results_v3/
+
+# Recoverable local archives are intentionally not committed as large binaries.
+/archives/**/*.tar.gz
+
+# Paper figures are generated from a declared result plan.
+/plot/figures/*.pdf
+/plot/figures/*.svg
+/plot/figures/manifest.json

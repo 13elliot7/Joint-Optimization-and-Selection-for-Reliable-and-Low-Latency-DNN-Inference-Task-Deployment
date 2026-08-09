@@ -14,8 +14,21 @@ from typing import Dict, Iterable, List, Sequence
 from core.environment import Environment
 from core.topology import TopologyConfig
 from metrics import ExperimentMetrics
-from proposed import AllDNNRefactor
+from proposed import AllDNNRefactor, CustomizedSearchConfig
 from rtbl.scheduler import RTBLRunner
+from semantics import ACTIVE_OBJECTIVE_SEMANTICS_VERSION
+
+
+def run_periodic_experiment(environment, catalog, arrival_trace, config):
+    """运行新版周期规划事件循环；旧基线结果口径保持不变。"""
+    from periodic_experiment import PeriodicExperimentRunner
+
+    return PeriodicExperimentRunner(
+        environment,
+        catalog,
+        arrival_trace,
+        config,
+    ).run()
 
 
 PARETO_ALGORITHMS = ("proposed", "customized", "random", "sa")
@@ -24,7 +37,6 @@ ALGORITHMS = tuple(dict.fromkeys((*PARETO_ALGORITHMS, *DEPLOYMENT_ALGORITHMS)))
 BASE_METRIC_FIELDS = (
     "avg_estimated_delay",
     "avg_operational_stability_score",
-    "avg_inference_fidelity_score",
     "avg_total_energy",
     "rejected_or_failed_count",
     "runtime_ms",
@@ -37,6 +49,18 @@ PARETO_METRIC_FIELDS = (
     "pareto_hypervolume_std",
     "pareto_postprocess_ms",
 )
+SENSITIVITY_METRIC_FIELDS = (
+    "quality_instance_count",
+    "quality_feasible_instances",
+    "quality_feasible_rate",
+    "quality_mean_candidate_count",
+    "quality_mean_evaluations",
+    "quality_mean_constraint_rejection_rate",
+    "quality_mean_nonconvergence_rate",
+    "quality_mean_archive_size",
+    "quality_mean_hypervolume",
+    "quality_mean_background_load",
+)
 
 
 @dataclass(frozen=True)
@@ -48,10 +72,10 @@ class Scenario:
     iteration_limit: int = 200
     mutation_probability: float = 0.25
     crossover_probability: float = 0.50
+    archive_capacity: int = 64
+    sensitivity_instance_count: int = 1
     alpha_r: float = 0.80
     beta_r: float = 0.50
-    alpha_a: float = 0.50
-    beta_a: float = 0.30
     alpha_l: float = 0.70
     beta_l: float = 0.40
     lambda_h: float = 0.70
@@ -73,8 +97,6 @@ class Scenario:
             "t_max": self.dnn_count,
             "alpha_r": self.alpha_r,
             "beta_r": self.beta_r,
-            "alpha_a": self.alpha_a,
-            "beta_a": self.beta_a,
             "alpha_l": self.alpha_l,
             "beta_l": self.beta_l,
             "lambda_h": self.lambda_h,
@@ -98,6 +120,7 @@ class Scenario:
 class RunOutput:
     metrics: ExperimentMetrics
     pareto_points: List[Dict[str, float | int | str]]
+    diagnostics: Dict[str, float | int | str] | None = None
 
 
 def _parse_csv_values(raw: str, value_type):
@@ -136,8 +159,6 @@ def _apply_dynamic_parameters(env: Environment, scenario: Scenario) -> None:
     for field in (
         "alpha_r",
         "beta_r",
-        "alpha_a",
-        "beta_a",
         "alpha_l",
         "beta_l",
         "lambda_h",
@@ -153,7 +174,6 @@ def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
 def _pareto_hypervolume(
     points: Sequence[Dict[str, float | int | str]],
     objectives: Sequence[str] = (
-        "inference_fidelity_norm",
         "operational_stability_norm",
         "delay_norm",
         "energy_norm",
@@ -224,7 +244,6 @@ def _normalize_pareto_points(
     normalized = []
     for point in points:
         required = (
-            "inference_fidelity_satisfaction",
             "operational_stability_satisfaction",
             "delay_satisfaction",
             "energy_satisfaction",
@@ -232,13 +251,11 @@ def _normalize_pareto_points(
         missing = [field for field in required if field not in point]
         if missing:
             raise ValueError(
-                "Pareto points must use the unified four-objective representation "
+                "Pareto points must use the unified three-objective representation "
                 f"(missing: {', '.join(missing)})"
             )
         enriched = dict(point)
-        fidelity = float(point["inference_fidelity_satisfaction"])
         stability = float(point["operational_stability_satisfaction"])
-        enriched["inference_fidelity_norm"] = _clamp(fidelity)
         enriched["operational_stability_norm"] = _clamp(stability)
         enriched["delay_norm"] = _clamp(float(point["delay_satisfaction"]))
         enriched["energy_norm"] = _clamp(float(point["energy_satisfaction"]))
@@ -260,7 +277,6 @@ def _pareto_hypervolume_by_dnn(
         _pareto_hypervolume(
             _normalize_pareto_points(group_points),
             objectives=(
-                "inference_fidelity_norm",
                 "operational_stability_norm",
                 "delay_norm",
                 "energy_norm",
@@ -275,12 +291,135 @@ def _pareto_hypervolume_by_dnn(
         "pareto_hypervolume_sum": sum(hypervolumes),
         "pareto_hypervolume_std": statistics.stdev(hypervolumes) if len(hypervolumes) > 1 else 0.0,
         "pareto_postprocess_ms": (__import__("time").monotonic() - started_at) * 1000.0,
-        "pareto_hv_version": "4d_unified_v4_global_semantics",
+        "pareto_hv_version": "3d_oss_delay_energy_v1",
     }
+
+
+def _run_isolated_sensitivity(scenario: Scenario, seed: int) -> RunOutput:
+    """在共享实例seed库上评估单DNN搜索质量，不提交资源或推进环境。"""
+    delays: List[float] = []
+    stability: List[float] = []
+    energy: List[float] = []
+    candidate_counts: List[float] = []
+    evaluation_counts: List[float] = []
+    constraint_rejection_rates: List[float] = []
+    nonconvergence_rates: List[float] = []
+    archive_sizes: List[float] = []
+    hypervolumes: List[float] = []
+    total_runtime_ms = 0.0
+    background_loads: List[float] = []
+
+    for instance_index in range(scenario.sensitivity_instance_count):
+        instance_seed = seed + instance_index * 1_000_003
+        random.seed(instance_seed)
+        kwargs = scenario.environment_kwargs()
+        kwargs["t_max"] = 1
+        env = Environment(**kwargs)
+        background_load = (0.0, 0.35, 0.65)[instance_index % 3]
+        background_loads.append(background_load)
+        for node in env.nodes:
+            node.cpu = max(0, round(node.cpu * (1.0 - background_load)))
+            node.load_ratio = background_load
+            node.heat = background_load
+        for link in env.link_nodes:
+            link.load_ratio = background_load
+        for physical_link in env.physical_links:
+            physical_link.load_ratio = background_load
+            physical_link.heat = background_load
+        env.refresh_effective_bandwidth()
+        env.refresh_dynamic_stability()
+        refactor = AllDNNRefactor(env)
+        _configure_search(refactor, scenario)
+        snapshot = env.capture_observation_snapshot("planning")
+        initial_slot = env.current_slot
+        initial_state_version = env.environment_state_version
+        result = refactor.generate_customized_candidates(
+            dnn_index=0,
+            snapshot=snapshot,
+            search_config=CustomizedSearchConfig(
+                population_size=scenario.population_size,
+                generations=scenario.iteration_limit,
+                archive_capacity=scenario.archive_capacity,
+                random_seed=instance_seed + 500_009,
+            ),
+        )
+        if (
+            env.current_slot != initial_slot
+            or env.environment_state_version != initial_state_version
+            or env.running_dnns
+        ):
+            raise RuntimeError("isolated sensitivity search mutated the environment")
+
+        total_runtime_ms += result.wall_time_ms
+        candidate_counts.append(float(len(result.candidates)))
+        evaluation_counts.append(float(result.evaluations))
+        denominator = max(result.evaluations, 1)
+        constraint_rejection_rates.append(
+            result.constraint_rejected_evaluations / denominator
+        )
+        nonconvergence_rates.append(result.nonconverged_evaluations / denominator)
+        archive_sizes.append(float(result.archive_size_before_selection))
+        hypervolumes.append(
+            _pareto_hypervolume(
+                [
+                    {
+                        "operational_stability_norm": candidate.objectives[0],
+                        "delay_norm": candidate.objectives[1],
+                        "energy_norm": candidate.objectives[2],
+                    }
+                    for candidate in result.candidates
+                ]
+            )
+        )
+        if not result.candidates:
+            continue
+        selected = max(result.candidates, key=lambda candidate: sum(candidate.objectives))
+        state = env.predict_candidate_state(0, list(selected.assignment), snapshot)
+        delays.append(state.estimated_delay_ms)
+        stability.append(state.operational_stability)
+        energy.append(state.total_energy)
+
+    instance_count = scenario.sensitivity_instance_count
+    feasible_count = len(delays)
+    metrics = ExperimentMetrics(
+        avg_delay=_mean(delays),
+        avg_operational_stability_score=_mean(stability),
+        avg_energy=_mean(energy),
+        failure_count=instance_count - feasible_count,
+        runtime_ms=round(total_runtime_ms),
+    )
+    return RunOutput(
+        metrics=metrics,
+        pareto_points=[],
+        diagnostics={
+            "experiment_layer": "algorithm_quality",
+            "workload_mode": "isolated_single_dnn_instance_bank",
+            "sensitivity_protocol_version": "isolated_single_dnn_v1",
+            "quality_instance_count": instance_count,
+            "quality_feasible_instances": feasible_count,
+            "quality_feasible_rate": feasible_count / instance_count,
+            "quality_mean_candidate_count": _mean(candidate_counts),
+            "quality_mean_evaluations": _mean(evaluation_counts),
+            "quality_mean_constraint_rejection_rate": _mean(
+                constraint_rejection_rates
+            ),
+            "quality_mean_nonconvergence_rate": _mean(nonconvergence_rates),
+            "quality_mean_archive_size": _mean(archive_sizes),
+            "quality_mean_hypervolume": _mean(hypervolumes),
+            "quality_mean_background_load": _mean(background_loads),
+            "quality_load_strata": ",".join(
+                ("low", "medium", "high")[: min(instance_count, 3)]
+            ),
+        },
+    )
 
 
 def run_once(algorithm: str, scenario: Scenario, seed: int) -> RunOutput:
     """Run one reproducible algorithm/scenario/seed combination."""
+    if scenario.suite == "sensitivity":
+        if algorithm != "customized":
+            raise ValueError("isolated sensitivity currently supports customized only")
+        return _run_isolated_sensitivity(scenario, seed)
     random.seed(seed)
     env = Environment(**scenario.environment_kwargs())
     initial_nodes = env.clone_nodes()
@@ -300,6 +439,10 @@ def run_once(algorithm: str, scenario: Scenario, seed: int) -> RunOutput:
     return RunOutput(
         metrics=metrics,
         pareto_points=list(refactor.pareto_points) if scenario.suite == "pareto" else [],
+        diagnostics={
+            "experiment_layer": "legacy_algorithm_auxiliary",
+            "workload_mode": "sequential_one_dnn_per_slot",
+        },
     )
 
 
@@ -320,8 +463,6 @@ def build_scenarios(args: argparse.Namespace) -> List[Scenario]:
             "weak": dict(
                 alpha_r=0.40,
                 beta_r=0.25,
-                alpha_a=0.25,
-                beta_a=0.15,
                 alpha_l=0.35,
                 beta_l=0.20,
                 lambda_h=0.50,
@@ -331,8 +472,6 @@ def build_scenarios(args: argparse.Namespace) -> List[Scenario]:
             "strong": dict(
                 alpha_r=1.20,
                 beta_r=0.80,
-                alpha_a=0.80,
-                beta_a=0.50,
                 alpha_l=1.10,
                 beta_l=0.70,
                 lambda_h=0.90,
@@ -357,9 +496,11 @@ def build_scenarios(args: argparse.Namespace) -> List[Scenario]:
                 Scenario(
                     suite="sensitivity",
                     name=f"population_{population_size}",
-                    dnn_count=args.dnn_count,
+                    dnn_count=1,
                     population_size=population_size,
                     iteration_limit=args.iteration_limit,
+                    archive_capacity=args.archive_capacity,
+                    sensitivity_instance_count=args.sensitivity_instances,
                 )
             )
         for iteration_limit in args.iteration_limits:
@@ -367,9 +508,11 @@ def build_scenarios(args: argparse.Namespace) -> List[Scenario]:
                 Scenario(
                     suite="sensitivity",
                     name=f"iterations_{iteration_limit}",
-                    dnn_count=args.dnn_count,
+                    dnn_count=1,
                     population_size=args.population_size,
                     iteration_limit=iteration_limit,
+                    archive_capacity=args.archive_capacity,
+                    sensitivity_instance_count=args.sensitivity_instances,
                 )
             )
         for probability in args.mutation_probabilities:
@@ -377,10 +520,37 @@ def build_scenarios(args: argparse.Namespace) -> List[Scenario]:
                 Scenario(
                     suite="sensitivity",
                     name=f"mutation_{probability:g}",
-                    dnn_count=args.dnn_count,
+                    dnn_count=1,
                     population_size=args.population_size,
                     iteration_limit=args.iteration_limit,
                     mutation_probability=probability,
+                    archive_capacity=args.archive_capacity,
+                    sensitivity_instance_count=args.sensitivity_instances,
+                )
+            )
+        for probability in args.crossover_probabilities:
+            scenarios.append(
+                Scenario(
+                    suite="sensitivity",
+                    name=f"crossover_{probability:g}",
+                    dnn_count=1,
+                    population_size=args.population_size,
+                    iteration_limit=args.iteration_limit,
+                    crossover_probability=probability,
+                    archive_capacity=args.archive_capacity,
+                    sensitivity_instance_count=args.sensitivity_instances,
+                )
+            )
+        for archive_capacity in args.archive_capacities:
+            scenarios.append(
+                Scenario(
+                    suite="sensitivity",
+                    name=f"archive_{archive_capacity}",
+                    dnn_count=1,
+                    population_size=args.population_size,
+                    iteration_limit=args.iteration_limit,
+                    archive_capacity=archive_capacity,
+                    sensitivity_instance_count=args.sensitivity_instances,
                 )
             )
         return scenarios
@@ -466,7 +636,9 @@ def _result_row(algorithm: str, scenario: Scenario, repeat: int, seed: int, outp
         "scenario_parameters": json.dumps(asdict(scenario), sort_keys=True),
     }
     row.update(dict(output.metrics.to_report_rows()))
-    row["result_schema_version"] = "semantic_names_v4_global"
+    if output.diagnostics:
+        row.update(output.diagnostics)
+    row["result_schema_version"] = "semantic_names_v5_three_objective"
     if algorithm == "rtbl":
         row["metric_version"] = "post_admission_v1"
     if scenario.suite == "pareto":
@@ -499,12 +671,12 @@ def _validate_existing_result_schema(raw_path: Path, suite: str) -> None:
             raise RuntimeError(
                 f"{raw_path} uses an incompatible Pareto result schema "
                 f"(missing: {', '.join(missing)}). Use a fresh output directory "
-                "or archive the legacy 3D-HV results before running 4D-HV experiments."
+                "or archive results from an older Pareto schema."
             )
         invalid_versions = {
             row.get("pareto_hv_version", "")
             for row in rows
-            if row.get("pareto_hv_version", "") != "4d_unified_v4_global_semantics"
+            if row.get("pareto_hv_version", "") != "3d_oss_delay_energy_v1"
         }
         if invalid_versions:
             raise RuntimeError(
@@ -516,7 +688,7 @@ def _validate_existing_result_schema(raw_path: Path, suite: str) -> None:
             f"{raw_path} contains Pareto-only fields in the {suite!r} suite. "
             "Use a fresh output directory so non-Pareto runtime results remain HV-free."
         )
-    required_semantics = "stability_fidelity_v2_return_energy"
+    required_semantics = ACTIVE_OBJECTIVE_SEMANTICS_VERSION
     if "objective_semantics_version" not in fieldnames or any(
         row.get("objective_semantics_version", "") != required_semantics
         for row in rows
@@ -526,12 +698,23 @@ def _validate_existing_result_schema(raw_path: Path, suite: str) -> None:
             "Use a fresh output directory or archive the legacy product-based results."
         )
     if "result_schema_version" not in fieldnames or any(
-        row.get("result_schema_version", "") != "semantic_names_v4_global"
+        row.get("result_schema_version", "") != "semantic_names_v5_three_objective"
         for row in rows
     ):
         raise RuntimeError(
-            f"{raw_path} does not use the semantic_names_v4_global result schema. "
+            f"{raw_path} does not use the semantic_names_v5_three_objective result schema. "
             "Migrate the legacy CSV or use a fresh output directory."
+        )
+    if suite == "sensitivity" and (
+        "sensitivity_protocol_version" not in fieldnames
+        or any(
+            row.get("sensitivity_protocol_version", "") != "isolated_single_dnn_v1"
+            for row in rows
+        )
+    ):
+        raise RuntimeError(
+            f"{raw_path} contains legacy sequential sensitivity results. "
+            "Use a fresh output directory for isolated_single_dnn_v1."
         )
 
 
@@ -544,14 +727,11 @@ def _validate_existing_pareto_points_schema(path: Path) -> None:
         rows = list(reader)
     required = {
         "total_energy",
-        "inference_fidelity",
         "operational_stability",
-        "inference_fidelity_satisfaction",
         "operational_stability_satisfaction",
         "delay_satisfaction",
         "energy_satisfaction",
         "energy_norm",
-        "inference_fidelity_norm",
         "operational_stability_norm",
         "pareto_hv_version",
         "objective_semantics_version",
@@ -559,19 +739,19 @@ def _validate_existing_pareto_points_schema(path: Path) -> None:
     }
     missing = sorted(required - fieldnames)
     invalid_version = any(
-        row.get("pareto_hv_version", "") != "4d_unified_v4_global_semantics"
-        or row.get("result_schema_version", "") != "semantic_names_v4_global"
+        row.get("pareto_hv_version", "") != "3d_oss_delay_energy_v1"
+        or row.get("result_schema_version", "") != "semantic_names_v5_three_objective"
         for row in rows
     )
     if missing or invalid_version:
         detail = (
             f"missing: {', '.join(missing)}"
             if missing
-            else "non-4d_unified_v4_global_semantics rows"
+            else "rows from an incompatible three-objective schema"
         )
         raise RuntimeError(
             f"{path} uses an incompatible Pareto-point schema ({detail}). "
-            "Use a fresh output directory or archive the legacy 3D-HV points."
+            "Use a fresh output directory or archive the legacy Pareto points."
         )
 
 
@@ -622,17 +802,14 @@ def _append_pareto_points(
         "seed",
         "dnn_index",
         "individual_index",
-        "inference_fidelity",
         "operational_stability",
         "delay_utility",
         "total_energy",
-        "inference_fidelity_satisfaction",
         "operational_stability_satisfaction",
         "energy_satisfaction",
         "estimated_delay",
         "deadline",
         "delay_satisfaction",
-        "inference_fidelity_norm",
         "operational_stability_norm",
         "delay_norm",
         "energy_norm",
@@ -671,23 +848,20 @@ def _append_pareto_points(
                     "seed": seed,
                     "dnn_index": point["dnn_index"],
                     "individual_index": point["individual_index"],
-                    "inference_fidelity": point["inference_fidelity"],
                     "operational_stability": point["operational_stability"],
                     "delay_utility": point["delay_utility"],
                     "total_energy": point["total_energy"],
-                    "inference_fidelity_satisfaction": point["inference_fidelity_satisfaction"],
                     "operational_stability_satisfaction": point["operational_stability_satisfaction"],
                     "energy_satisfaction": point["energy_satisfaction"],
                     "estimated_delay": point.get("estimated_delay", ""),
                     "deadline": point.get("deadline", ""),
                     "delay_satisfaction": point.get("delay_satisfaction", ""),
-                    "inference_fidelity_norm": point["inference_fidelity_norm"],
                     "operational_stability_norm": point["operational_stability_norm"],
                     "delay_norm": point["delay_norm"],
                     "energy_norm": point["energy_norm"],
-                    "pareto_hv_version": "4d_unified_v4_global_semantics",
-                    "objective_semantics_version": "stability_fidelity_v2_return_energy",
-                    "result_schema_version": "semantic_names_v4_global",
+                    "pareto_hv_version": "3d_oss_delay_energy_v1",
+                    "objective_semantics_version": ACTIVE_OBJECTIVE_SEMANTICS_VERSION,
+                    "result_schema_version": "semantic_names_v5_three_objective",
                 }
             )
 
@@ -714,7 +888,12 @@ def write_summary(raw_path: Path, summary_path: Path, algorithms: Sequence[str] 
 
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     is_pareto = bool(rows) and all(row["suite"] == "pareto" for row in rows)
-    metric_fields = BASE_METRIC_FIELDS + (PARETO_METRIC_FIELDS if is_pareto else ())
+    is_sensitivity = bool(rows) and all(row["suite"] == "sensitivity" for row in rows)
+    metric_fields = (
+        BASE_METRIC_FIELDS
+        + (PARETO_METRIC_FIELDS if is_pareto else ())
+        + (SENSITIVITY_METRIC_FIELDS if is_sensitivity else ())
+    )
     fields = ["suite", "scenario", "algorithm", "runs"]
     for metric in metric_fields:
         fields.extend((f"{metric}_mean", f"{metric}_std"))
@@ -783,7 +962,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--base-seed", type=int, default=20260719)
-    parser.add_argument("--output-dir", type=Path, default=Path("experiment_results"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results/compatibility/legacy_algorithm_quality"),
+    )
     parser.add_argument("--dnn-count", type=int, default=30)
     parser.add_argument("--dnn-counts", default="5,10,20,30,40")
     parser.add_argument("--population-size", type=int, default=60)
@@ -791,6 +974,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--population-sizes", default="20,40,60,80,100")
     parser.add_argument("--iteration-limits", default="80,120,160,200,240,280")
     parser.add_argument("--mutation-probabilities", default="0.10,0.15,0.20,0.25,0.30,0.35")
+    parser.add_argument("--crossover-probabilities", default="0.25,0.50,0.75")
+    parser.add_argument("--archive-capacity", type=int, default=64)
+    parser.add_argument("--archive-capacities", default="16,32,64,128")
+    parser.add_argument("--sensitivity-instances", type=int, default=30)
+    parser.add_argument("--quick", action="store_true")
     parser.add_argument("--small-dnn-count", type=int, default=20)
     parser.add_argument("--medium-dnn-count", type=int, default=60)
     parser.add_argument("--large-dnn-count", type=int, default=120)
@@ -800,6 +988,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    print(
+        "[deprecated] experiment_runner.py is a compatibility backend; "
+        "use experiments.py and the search_quality suite for formal results"
+    )
     default_algorithms = {
         "overall": list(DEPLOYMENT_ALGORITHMS),
         "dynamic": list(DEPLOYMENT_ALGORITHMS),
@@ -817,12 +1009,38 @@ def main() -> None:
     invalid_algorithms = sorted(set(args.algorithms) - set(ALGORITHMS))
     if invalid_algorithms:
         parser.error(f"unsupported algorithms: {', '.join(invalid_algorithms)}")
+    if args.suite == "sensitivity" and args.algorithms != ["customized"]:
+        parser.error("isolated sensitivity supports only the customized algorithm")
     args.dnn_counts = _parse_csv_values(args.dnn_counts, int)
     args.population_sizes = _parse_csv_values(args.population_sizes, int)
     args.iteration_limits = _parse_csv_values(args.iteration_limits, int)
     args.mutation_probabilities = _parse_csv_values(args.mutation_probabilities, float)
+    args.crossover_probabilities = _parse_csv_values(args.crossover_probabilities, float)
+    args.archive_capacities = _parse_csv_values(args.archive_capacities, int)
+    if args.quick:
+        args.repeats = 1
+        args.sensitivity_instances = min(args.sensitivity_instances, 2)
+        args.population_size = 4
+        args.iteration_limit = 2
+        args.population_sizes = [4]
+        args.iteration_limits = [2]
+        args.mutation_probabilities = [0.25]
+        args.crossover_probabilities = [0.5]
+        args.archive_capacity = min(args.archive_capacity, 8)
+        args.archive_capacities = [args.archive_capacity]
     if args.repeats < 1:
         parser.error("--repeats must be at least 1")
+    if (
+        args.sensitivity_instances < 1
+        or args.population_size < 2
+        or args.population_size % 2
+        or any(value < 2 or value % 2 for value in args.population_sizes)
+        or args.iteration_limit < 1
+        or any(value < 1 for value in args.iteration_limits)
+        or args.archive_capacity < 1
+        or any(value < 1 for value in args.archive_capacities)
+    ):
+        parser.error("invalid sensitivity instance or search budget")
     run_experiments(
         build_scenarios(args),
         args.algorithms,

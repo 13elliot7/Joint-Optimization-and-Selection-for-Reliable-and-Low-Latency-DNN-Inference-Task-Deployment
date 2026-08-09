@@ -72,8 +72,9 @@ def create_dnn(task_count: int, nodes: List[Node], dag_generator: DAGGenerator) 
                 link_dnns.append(LinkDNN(tasks[j], tasks[p], 8 * float_tran))
 
     dnn = DNN(tasks, link_dnns, delay, initiate)
-    dnn.preference_fidelity = 0.7 + 0.3 * random.random()
     dnn.preference_stability = 0.7 + 0.3 * random.random()
+    dnn.preference_delay = 0.7 + 0.3 * random.random()
+    dnn.preference_energy = 0.7 + 0.3 * random.random()
     dnn.startFloat = 588 * 8
     dnn.backFloat = 8 * (int(90 * random.random()) + 10)
 
@@ -90,7 +91,6 @@ def _create_edge_node() -> Node:
         max_cpu=cpu,
         level=2,
         operational_stability=random.random() * 0.05 + 0.94,
-        inference_fidelity=random.random() * 0.05 + 0.94,
         float_rate=int(random.random() * 8 + 16),
     )
     node.comp_power = _default_comp_power(node.level)
@@ -126,7 +126,7 @@ def _create_parametric_nodes(config: TopologyConfig) -> Tuple[List[Node], List[L
     edge_nodes: List[Node] = []
 
     for _ in range(cloud_count):
-        cloud_node = Node(2**31 - 1, 2**31 - 1, 3, 0.99, 0.99, 28)
+        cloud_node = Node(2**31 - 1, 2**31 - 1, 3, 0.99, 28)
         cloud_node.comp_power = _default_comp_power(cloud_node.level)
         cloud_nodes.append(cloud_node)
         nodes.append(cloud_node)
@@ -184,7 +184,6 @@ def _create_parametric_nodes(config: TopologyConfig) -> Tuple[List[Node], List[L
             cpu,
             1,
             0.9 + (random.random() * 0.05),
-            0.9 + (random.random() * 0.05),
             1.0 + (random.random() * 3),
         )
         user_node.comp_power = _default_comp_power(user_node.level)
@@ -202,7 +201,7 @@ def create_nodes(config: TopologyConfig | None = None) -> Tuple[List[Node], List
 
     nodes: List[Node] = []
     link_nodes: List[LinkNode] = []
-    cloud_node = Node(2**31 - 1, 2**31 - 1, 3, 0.99, 0.99, 28)
+    cloud_node = Node(2**31 - 1, 2**31 - 1, 3, 0.99, 28)
     cloud_node.comp_power = _default_comp_power(cloud_node.level)
     nodes.append(cloud_node)
     edge_nodes: List[Node] = []
@@ -210,7 +209,6 @@ def create_nodes(config: TopologyConfig | None = None) -> Tuple[List[Node], List
     def create_default_edge_node(max_cpu: int) -> Node:
         """使用最终采样值构造节点，确保当前分数与基准先验一致。"""
         operational_stability = random.random() * 0.05 + 0.94
-        inference_fidelity = random.random() * 0.05 + 0.94
         float_rate = int(random.random() * 8 + 16)
         cpu = int(16 + random.random() * 16)
         return Node(
@@ -218,7 +216,6 @@ def create_nodes(config: TopologyConfig | None = None) -> Tuple[List[Node], List
             max_cpu=max_cpu,
             level=2,
             operational_stability=operational_stability,
-            inference_fidelity=inference_fidelity,
             float_rate=float_rate,
         )
 
@@ -322,7 +319,6 @@ def create_nodes(config: TopologyConfig | None = None) -> Tuple[List[Node], List
         for _ in range(random_count):
             cpu = 8 + int(8 * random.random())
             operational_stability = 0.9 + (random.random() * 0.05)
-            inference_fidelity = 0.9 + (random.random() * 0.05)
             float_num = 1.0 + (random.random() * 3)
             band = 20 + int(random.random() * 31)
             user_node = Node(
@@ -330,7 +326,6 @@ def create_nodes(config: TopologyConfig | None = None) -> Tuple[List[Node], List
                 cpu,
                 1,
                 operational_stability,
-                inference_fidelity,
                 float_num,
             )
             user_node.comp_power = _default_comp_power(user_node.level)

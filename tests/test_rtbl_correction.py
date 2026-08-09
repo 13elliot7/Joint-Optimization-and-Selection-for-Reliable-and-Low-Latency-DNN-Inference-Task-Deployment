@@ -38,7 +38,6 @@ class RTBLCorrectionTests(unittest.TestCase):
                 return_value=PostAdmissionMetrics(
                     delay=123.0,
                     operational_stability=0.42,
-                    inference_fidelity=0.84,
                     total_energy=456.0,
                     raw_joint_product=0.35,
                 ),
@@ -50,7 +49,6 @@ class RTBLCorrectionTests(unittest.TestCase):
         evaluator.assert_called_once()
         self.assertEqual(metrics.avg_delay, 123.0)
         self.assertEqual(metrics.avg_operational_stability_score, 0.42)
-        self.assertEqual(metrics.avg_inference_fidelity_score, 0.84)
         self.assertEqual(metrics.avg_energy, 456.0)
         self.assertEqual(metrics.failure_count, 0)
 

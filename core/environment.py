@@ -3,21 +3,38 @@ from __future__ import annotations
 import heapq
 import math
 import random
+import threading
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 from core.topology import TopologyConfig, create_dnns, create_nodes
 from models import (
+    CandidateStateSnapshot,
     CandidateQualityScores,
     DNN,
     LinkDNN,
     LinkNode,
     Node,
+    ObservationPurpose,
+    ObservationSnapshot,
     PhysicalLinkState,
     PostAdmissionMetrics,
     RunningDNN,
     Task,
 )
+from semantics import (
+    ACTIVE_OBJECTIVE_SEMANTICS_VERSION,
+    LEGACY_OBJECTIVE_SEMANTICS_VERSION,
+    PERIODIC_SEMANTIC_VERSIONS,
+)
+
+
+class StaleEnvironmentStateError(RuntimeError):
+    """提交时环境版本已经不同于在线评价所用版本。"""
+
+
+class InfeasibleAssignmentError(RuntimeError):
+    """最终复验发现候选不满足当前硬约束。"""
 
 
 @dataclass
@@ -30,14 +47,15 @@ class Environment:
     mean: float = 2.5
     sigma: float = 0.8
     h_off: int = 100
+    availability_history_limit: int = 1000
+    availability_beta_success: float = 1.0
+    availability_beta_failure: float = 1.0
+    availability_seed: int | None = None
     slot_length: float = 100.0
     alpha_r: float = 0.8
     beta_r: float = 0.5
-    alpha_a: float = 0.5
-    beta_a: float = 0.3
     lambda_h: float = 0.7
     o_min: float = 0.5
-    a_min: float = 0.5
     alpha_l: float = 0.7
     beta_l: float = 0.4
     lambda_g: float = 0.7
@@ -48,7 +66,10 @@ class Environment:
     node_stability_weight: float = 0.5
     link_stability_weight: float = 0.5
     quality_log_epsilon: float = 1e-12
-    objective_semantics_version: str = "stability_fidelity_v2_return_energy"
+    candidate_fixed_point_max_iterations: int = 20
+    candidate_fixed_point_relative_tolerance: float = 1e-4
+    candidate_fixed_point_damping: float = 0.5
+    objective_semantics_version: str = ACTIVE_OBJECTIVE_SEMANTICS_VERSION
     topology_config: TopologyConfig | None = None
     verbose: bool = True
 
@@ -56,15 +77,42 @@ class Environment:
         """初始化拓扑、DNN 请求和动态运行状态。"""
         self._validate_quality_configuration()
         self.nodes, self.link_nodes = create_nodes(self.topology_config)
+        if self.availability_node_count < 0:
+            raise ValueError("availability_node_count must be non-negative")
+        self.availability_node_count = min(self.availability_node_count, len(self.nodes))
+        for index, node in enumerate(self.nodes):
+            node.availability_mode = (
+                "stochastic" if index < self.availability_node_count else "always_on"
+            )
+        self._availability_rng = (
+            random.Random(self.availability_seed)
+            if self.availability_seed is not None
+            else random
+        )
         self._build_physical_link_index()
         self.ds = create_dnns(self.t_max, self.nodes)
         self._build_path_cache()
         self.rj_history = self._generate_rj_history()
-        self.up = [True for _ in range(self.availability_node_count)]
-        self.remaining_time = [self._sample_uptime() for _ in range(self.availability_node_count)]
+        self.up = [True for _ in self.nodes]
+        self.remaining_time = [
+            self._sample_uptime() if node.availability_mode == "stochastic" else 0
+            for node in self.nodes
+        ]
+        self._initial_rj_history = [list(history) for history in self.rj_history]
+        self._initial_up = list(self.up)
+        self._initial_remaining_time = list(self.remaining_time)
+        self._initial_availability_rng_state = (
+            self._availability_rng.getstate()
+            if self.availability_seed is not None
+            else None
+        )
         self.running_dnns: List[RunningDNN] = []
         self.current_slot = 0
         self.finished_total = 0
+        self.topology_version = 0
+        self.environment_state_version = 0
+        self._snapshot_version = 0
+        self._commit_lock = threading.Lock()
         self._initialize_dynamic_state()
         self._validate_component_quality_priors()
         self._print_initialization_summary()
@@ -73,9 +121,12 @@ class Environment:
         """拒绝无法形成有界对数域质量分数的配置。"""
         if not 0.0 < self.quality_log_epsilon < 1.0:
             raise ValueError("quality_log_epsilon must be in (0, 1)")
+        if self.h_off <= 0 or self.availability_history_limit < self.h_off:
+            raise ValueError("availability history limits must be positive and ordered")
+        if self.availability_beta_success <= 0.0 or self.availability_beta_failure <= 0.0:
+            raise ValueError("availability Beta prior parameters must be positive")
         for name, value in (
             ("o_min", self.o_min),
-            ("a_min", self.a_min),
             ("l_min", self.l_min),
         ):
             if not 0.0 < value <= 1.0:
@@ -83,8 +134,6 @@ class Environment:
         for name, value in (
             ("alpha_r", self.alpha_r),
             ("beta_r", self.beta_r),
-            ("alpha_a", self.alpha_a),
-            ("beta_a", self.beta_a),
             ("alpha_l", self.alpha_l),
             ("beta_l", self.beta_l),
             ("node_stability_weight", self.node_stability_weight),
@@ -97,17 +146,31 @@ class Environment:
         for name, value in (("lambda_h", self.lambda_h), ("lambda_g", self.lambda_g)):
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"{name} must be in [0, 1]")
+        if self.candidate_fixed_point_max_iterations <= 0:
+            raise ValueError("candidate_fixed_point_max_iterations must be positive")
+        if self.candidate_fixed_point_relative_tolerance <= 0.0:
+            raise ValueError("candidate_fixed_point_relative_tolerance must be positive")
+        if not 0.0 < self.candidate_fixed_point_damping <= 1.0:
+            raise ValueError("candidate_fixed_point_damping must be in (0, 1]")
 
     def _validate_component_quality_priors(self) -> None:
         """校验节点和物理链路的经验质量先验。"""
         for node in self.nodes:
             if not self.o_min <= node.base_operational_stability <= 1.0:
                 raise ValueError("node operational stability prior must be in [o_min, 1]")
-            if not self.a_min <= node.base_inference_fidelity <= 1.0:
-                raise ValueError("node inference fidelity prior must be in [a_min, 1]")
         for physical_link in self.physical_links:
             if not self.l_min <= physical_link.base_transmission_stability <= 1.0:
                 raise ValueError("link transmission stability prior must be in [l_min, 1]")
+
+    @property
+    def uses_periodic_semantics(self) -> bool:
+        """仅在显式选择当前目标语义时启用时域可用性 OSS。"""
+        return self.objective_semantics_version == PERIODIC_SEMANTIC_VERSIONS.objective
+
+    def profile_id_for_dnn(self, dnn_index: int) -> str:
+        """返回请求绑定的画像 ID；旧请求使用稳定的索引兼容 ID。"""
+        profile_id = self.ds[dnn_index].profile_id
+        return profile_id or f"legacy_dnn_{dnn_index}"
 
     def reset_nodes(self, snapshot: List[Node]) -> None:
         """用快照恢复节点状态并清空动态运行上下文。"""
@@ -116,17 +179,96 @@ class Environment:
             self.nodes[idx].max_cpu = node.max_cpu
             self.nodes[idx].level = node.level
             self.nodes[idx].operational_stability = node.operational_stability
-            self.nodes[idx].inference_fidelity = node.inference_fidelity
             self.nodes[idx].float_rate = node.float_rate
             self.nodes[idx].base_operational_stability = node.base_operational_stability
-            self.nodes[idx].base_inference_fidelity = node.base_inference_fidelity
             self.nodes[idx].load_ratio = node.load_ratio
             self.nodes[idx].heat = node.heat
             self.nodes[idx].comp_power = node.comp_power
+            self.nodes[idx].availability_mode = node.availability_mode
         self.running_dnns = []
         self.current_slot = 0
         self.finished_total = 0
+        self.environment_state_version = 0
+        self._snapshot_version = 0
+        self.rj_history = [list(history) for history in self._initial_rj_history]
+        self.up = list(self._initial_up)
+        self.remaining_time = list(self._initial_remaining_time)
+        if self._initial_availability_rng_state is not None:
+            self._availability_rng.setstate(self._initial_availability_rng_state)
         self._reset_link_state()
+
+    def capture_observation_snapshot(
+        self,
+        purpose: ObservationPurpose = "planning",
+    ) -> ObservationSnapshot:
+        """捕获算法当前可见的不可变状态，不暴露未来请求或故障轨迹。"""
+        if purpose not in {
+            "planning",
+            "publication_revalidation",
+            "online_admission",
+        }:
+            raise ValueError(f"unsupported observation purpose: {purpose}")
+        snapshot_version = self._snapshot_version
+        self._snapshot_version += 1
+        node_online = tuple(bool(value) for value in self.up)
+        availability_history = tuple(
+            tuple(bool(value) for value in self.rj_history[index])
+            for index in range(len(self.nodes))
+        )
+        effective_bandwidths = tuple(
+            self.get_effective_bandwidth(link)
+            for link in self.link_nodes
+        )
+        offered_rates = self.aggregate_directional_offered_rates()
+        directional_offered_rates = tuple(
+            float(offered_rates.get(link, 0.0))
+            for link in self.link_nodes
+        )
+        return ObservationSnapshot(
+            snapshot_version=snapshot_version,
+            environment_state_version=self.environment_state_version,
+            topology_version=self.topology_version,
+            slot=self.current_slot,
+            purpose=purpose,
+            node_online=node_online,
+            node_availability_modes=tuple(
+                node.availability_mode for node in self.nodes
+            ),
+            node_available_cpu=tuple(float(node.cpu) for node in self.nodes),
+            node_loads=tuple(float(node.load_ratio) for node in self.nodes),
+            node_heats=tuple(float(node.heat) for node in self.nodes),
+            node_availability_history=availability_history,
+            directional_offered_rates=directional_offered_rates,
+            directional_link_loads=tuple(float(link.load_ratio) for link in self.link_nodes),
+            physical_link_heats=tuple(float(link.heat) for link in self.physical_links),
+            effective_bandwidths=effective_bandwidths,
+        )
+
+    def origin_group_for_node(self, node_index: int) -> int:
+        """把请求源节点映射为稳定的接入边缘组。"""
+        if not 0 <= node_index < len(self.nodes):
+            raise ValueError("invalid node_index")
+        if self.nodes[node_index].level == 2:
+            return node_index
+        adjacent_edges = sorted(
+            {
+                self._node_index_by_id[id(link.e_node)]
+                for link in self.link_nodes
+                if self._node_index_by_id[id(link.s_node)] == node_index
+                and link.e_node.level == 2
+            }
+        )
+        if adjacent_edges:
+            return adjacent_edges[0]
+        edge_nodes = [
+            index for index, node in enumerate(self.nodes) if node.level == 2
+        ]
+        if not edge_nodes:
+            raise ValueError("topology has no edge node for origin grouping")
+        return min(
+            edge_nodes,
+            key=lambda edge_index: self._path_delay_factors[(node_index, edge_index)],
+        )
 
     def clone_nodes(self) -> List[Node]:
         """复制当前全部节点状态。"""
@@ -231,12 +373,9 @@ class Environment:
         for node in self.nodes:
             if node.base_operational_stability is None:
                 node.base_operational_stability = node.operational_stability
-            if node.base_inference_fidelity is None:
-                node.base_inference_fidelity = node.inference_fidelity
             node.load_ratio = 0.0
             node.heat = 0.0
             node.operational_stability = node.base_operational_stability
-            node.inference_fidelity = node.base_inference_fidelity
         self._reset_link_state()
 
     def _print_initialization_summary(self) -> None:
@@ -281,8 +420,9 @@ class Environment:
             f"tasks={len(dnn.tasks)} "
             f"deadline={dnn.delay} "
             f"initiate={dnn.initiateNode} "
-            f"preference_fidelity={dnn.preference_fidelity:.3f} "
-            f"preference_stability={dnn.preference_stability:.3f}"
+            f"preference_stability={dnn.preference_stability:.3f} "
+            f"preference_delay={dnn.preference_delay:.3f} "
+            f"preference_energy={dnn.preference_energy:.3f}"
         )
 
     def _reset_link_state(self) -> None:
@@ -344,6 +484,81 @@ class Environment:
         """复用原始静态时延模型估计部署完成时间。"""
         return self.count_delay_by_assignment(self.ds[dnn_index], assignment)
 
+    def _effective_bandwidth_from_predicted_state(
+        self,
+        link: LinkNode,
+        directional_load: float,
+        physical_heat: float,
+    ) -> float:
+        """在不修改链路对象的情况下计算预测有效带宽。"""
+        base = float(link.base_band_width or link.band_width)
+        degradation = (
+            1.0
+            + self.bandwidth_heat_gamma * physical_heat
+            + self.bandwidth_load_gamma * directional_load
+        )
+        effective = base / max(degradation, 1.0)
+        return max(base * self.min_bandwidth_ratio, effective, 1.0)
+
+    def estimate_delay_from_assignment_with_bandwidths(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        effective_bandwidths: Dict[LinkNode, float],
+    ) -> float:
+        """使用显式带宽映射计算输入、关键路径和结果回传时延。"""
+        dnn = self.ds[dnn_index]
+        if len(assignment) != len(dnn.tasks):
+            raise ValueError("assignment length must equal the DNN task count")
+        task_index_by_id = {id(task): index for index, task in enumerate(dnn.tasks)}
+        incoming: Dict[int, List[tuple[int, float]]] = {
+            index: [] for index in range(len(dnn.tasks))
+        }
+        for dnn_link in dnn.links:
+            source = task_index_by_id[id(dnn_link.s_task)]
+            target = task_index_by_id[id(dnn_link.e_task)]
+            incoming[target].append((source, float(dnn_link.float_tran)))
+
+        def path_delay(start: int, end: int, data_amount: float) -> float:
+            return sum(
+                data_amount / max(effective_bandwidths.get(link, 1.0), 1.0)
+                for link in self._path_links[(start, end)]
+            )
+
+        memo: Dict[int, float] = {}
+
+        def critical_delay(task_index: int) -> float:
+            cached = memo.get(task_index)
+            if cached is not None:
+                return cached
+            node_index = assignment[task_index]
+            computation = (
+                dnn.tasks[task_index].float_num
+                / max(float(self.nodes[node_index].float_rate), 1e-12)
+            )
+            if task_index == 0:
+                result = computation
+            else:
+                predecessors = incoming[task_index]
+                result = max(
+                    (
+                        critical_delay(source)
+                        + path_delay(assignment[source], node_index, data_amount)
+                        + computation
+                        for source, data_amount in predecessors
+                    ),
+                    default=0.0,
+                )
+            memo[task_index] = result
+            return result
+
+        first_node = assignment[0]
+        last_node = assignment[-1]
+        upload = path_delay(dnn.initiateNode, first_node, float(dnn.startFloat))
+        critical = critical_delay(len(dnn.tasks) - 1)
+        result_return = path_delay(last_node, dnn.initiateNode, float(dnn.backFloat))
+        return upload + critical + result_return
+
     def collect_used_nodes(self, dnn_index: int, assignment: List[int]) -> List[int]:
         """提取部署方案实际使用的唯一节点集合。"""
         del dnn_index
@@ -375,11 +590,71 @@ class Environment:
         estimated_runtime: float,
     ) -> Dict[LinkNode, float]:
         """预测接纳候选部署后相关链路的负载率。"""
-        runtime = max(float(estimated_runtime), self.slot_length, 1.0)
-        link_weights = self._collect_link_weights(dnn_index, assignment)
+        candidate_rates = self.candidate_directional_offered_rates(
+            dnn_index,
+            assignment,
+            estimated_runtime,
+        )
+        offered_rates = self.aggregate_directional_offered_rates(candidate_rates)
+        return self.directional_load_ratios_from_offered_rates(offered_rates)
+
+    @staticmethod
+    def directional_offered_rates_from_data(
+        directional_data: Dict[LinkNode, float],
+        active_duration_ms: float,
+    ) -> Dict[LinkNode, float]:
+        """把方向链路数据量统一换算为当前模型的 kbit/ms offered rate。"""
+        duration = max(float(active_duration_ms), 1.0)
         return {
-            link: link.load_ratio + data_amount / runtime / max(self.get_effective_bandwidth(link), 1.0)
-            for link, data_amount in link_weights.items()
+            link: data_amount / duration
+            for link, data_amount in directional_data.items()
+            if data_amount > 0.0
+        }
+
+    def candidate_directional_offered_rates(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        estimated_runtime: float,
+    ) -> Dict[LinkNode, float]:
+        """使用唯一数据量和时长口径计算候选方向 offered rate。"""
+        runtime = max(float(estimated_runtime), self.slot_length, 1.0)
+        return self.directional_offered_rates_from_data(
+            self._collect_link_weights(dnn_index, assignment),
+            runtime,
+        )
+
+    def aggregate_directional_offered_rates(
+        self,
+        additional_rates: Dict[LinkNode, float] | None = None,
+    ) -> Dict[LinkNode, float]:
+        """汇总全部运行任务及可选候选任务的方向 offered rate。"""
+        offered_rates: Dict[LinkNode, float] = {}
+        for running_dnn in self.running_dnns:
+            runtime = max(running_dnn.estimated_runtime, self.slot_length, 1.0)
+            running_rates = self.directional_offered_rates_from_data(
+                self._collect_link_weights(
+                    running_dnn.dnn_index,
+                    running_dnn.assignment,
+                ),
+                runtime,
+            )
+            for link, rate in running_rates.items():
+                offered_rates[link] = offered_rates.get(link, 0.0) + rate
+        for link, rate in (additional_rates or {}).items():
+            if rate > 0.0:
+                offered_rates[link] = offered_rates.get(link, 0.0) + rate
+        return offered_rates
+
+    def directional_load_ratios_from_offered_rates(
+        self,
+        offered_rates: Dict[LinkNode, float],
+    ) -> Dict[LinkNode, float]:
+        """使用当前有效带宽把 offered rate 唯一映射为方向负载率。"""
+        return {
+            link: rate / max(self.get_effective_bandwidth(link), 1.0)
+            for link, rate in offered_rates.items()
+            if rate > 0.0
         }
 
     def _physical_load_ratios_from_directional(
@@ -409,24 +684,22 @@ class Environment:
         estimated_runtime: float,
     ) -> tuple[float, float]:
         """汇总候选流量后按唯一物理链路预测稳定性与可行性。"""
-        runtime = max(float(estimated_runtime), self.slot_length, 1.0)
         overload = 0.0
-        added_bandwidth: Dict[LinkNode, float] = {}
+        directional_data: Dict[LinkNode, float] = {}
         for start_node_idx, end_node_idx, data_amount in transfers:
             if data_amount <= 0:
                 continue
             for link in self._path_links[(start_node_idx, end_node_idx)]:
-                added_bandwidth[link] = (
-                    added_bandwidth.get(link, 0.0) + data_amount / runtime
-                )
-        directional_loads = {
-            link: link.load_ratio
-            + added / max(self.get_effective_bandwidth(link), 1.0)
-            for link, added in added_bandwidth.items()
-        }
+                directional_data[link] = directional_data.get(link, 0.0) + data_amount
+        added_rates = self.directional_offered_rates_from_data(
+            directional_data,
+            max(float(estimated_runtime), self.slot_length, 1.0),
+        )
+        offered_rates = self.aggregate_directional_offered_rates(added_rates)
+        directional_loads = self.directional_load_ratios_from_offered_rates(offered_rates)
         for predicted_load in directional_loads.values():
             overload += max(0.0, predicted_load - 1.0)
-        physical_links = self._unique_physical_links(list(directional_loads))
+        physical_links = self._unique_physical_links(list(added_rates))
         physical_loads = self._physical_load_ratios_from_directional(
             directional_loads,
             physical_links,
@@ -602,6 +875,10 @@ class Environment:
         log_sum = sum(math.log(max(value, self.quality_log_epsilon)) for value in values)
         return math.exp(log_sum / len(values))
 
+    def service_exposure_slots(self, estimated_delay_ms: float) -> int:
+        """固定服务时长 v1：统一资源占用、完成事件和故障暴露时域。"""
+        return max(1, math.ceil(max(float(estimated_delay_ms), 0.0) / self.slot_length))
+
     def _aggregate_operational_stability(
         self,
         node_stability: float,
@@ -618,13 +895,87 @@ class Environment:
             + link_weight * math.log(max(link_stability, self.quality_log_epsilon))
         )
 
+    def predict_node_continuous_availability(
+        self,
+        node_index: int,
+        horizon_slots: int,
+        observation_snapshot: ObservationSnapshot,
+    ) -> tuple[float, float]:
+        """用快照内历史窗口和 Beta 平滑估计连续在线概率及置信度。"""
+        if not 0 <= node_index < len(self.nodes):
+            raise ValueError("invalid node_index")
+        if horizon_slots <= 0:
+            raise ValueError("horizon_slots must be positive")
+        if observation_snapshot.node_availability_modes[node_index] == "always_on":
+            return 1.0, 1.0
+        if not observation_snapshot.node_online[node_index]:
+            return 0.0, 1.0
+
+        history = observation_snapshot.node_availability_history[node_index]
+        alpha = self.availability_beta_success
+        beta = self.availability_beta_failure
+        estimates: List[float] = []
+        horizon_eligible = 0
+        for window in range(1, horizon_slots + 1):
+            eligible = 0
+            success = 0
+            for start in range(0, len(history) - window):
+                if not history[start]:
+                    continue
+                eligible += 1
+                if all(history[start + 1 : start + window + 1]):
+                    success += 1
+            estimates.append((success + alpha) / (eligible + alpha + beta))
+            if window == horizon_slots:
+                horizon_eligible = eligible
+        # 有限窗口的分母不同会产生微小反常；取前缀最小值保证生存概率随时域不增。
+        probability = min(estimates)
+        confidence = horizon_eligible / (horizon_eligible + alpha + beta)
+        return probability, confidence
+
+    def aggregate_candidate_availability(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        horizon_slots: int,
+        observation_snapshot: ObservationSnapshot,
+    ) -> tuple[float, float]:
+        """按任务 FLOPs 权重聚合部署节点在执行时域内的连续可用性。"""
+        dnn = self.ds[dnn_index]
+        float_by_node: Dict[int, float] = {}
+        for task_index, node_index in enumerate(assignment):
+            float_by_node[node_index] = (
+                float_by_node.get(node_index, 0.0) + dnn.tasks[task_index].float_num
+            )
+        total_float = sum(float_by_node.values())
+        if total_float <= 0.0:
+            return 0.0, 0.0
+        weighted_log = 0.0
+        confidence = 0.0
+        for node_index, node_float in float_by_node.items():
+            weight = node_float / total_float
+            probability, node_confidence = self.predict_node_continuous_availability(
+                node_index,
+                horizon_slots,
+                observation_snapshot,
+            )
+            if probability <= 0.0:
+                return 0.0, node_confidence
+            weighted_log += weight * math.log(probability)
+            confidence += weight * node_confidence
+        # The normalized weights can sum to a value infinitesimally above one
+        # (for example 1.0000000000000002).  Keep the probability contract exact
+        # at this numerical boundary before constructing CandidateStateSnapshot.
+        confidence = max(0.0, min(1.0, confidence))
+        return math.exp(weighted_log), confidence
+
     def predict_candidate_scores_by_assignment(
         self,
         dnn_index: int,
         assignment: List[int],
         estimated_runtime: float | None = None,
     ) -> CandidateQualityScores:
-        """预测候选接纳后的 OSS/IFS，不修改环境真实状态。"""
+        """预测候选接纳后的 OSS，不修改环境真实状态。"""
         dnn = self.ds[dnn_index]
         if len(assignment) != len(dnn.tasks):
             raise ValueError("assignment length must equal the DNN task count")
@@ -641,24 +992,50 @@ class Environment:
             used_physical_links,
         )
 
+        return self._quality_scores_from_predicted_loads(
+            dnn_index,
+            assignment,
+            predicted_node_loads,
+            predicted_physical_loads,
+        )
+
+    def _quality_scores_from_predicted_loads(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        predicted_node_loads: Dict[int, float],
+        predicted_physical_loads: Dict[PhysicalLinkState, float],
+        base_node_heats: Dict[int, float] | None = None,
+        base_physical_heats: Dict[PhysicalLinkState, float] | None = None,
+    ) -> CandidateQualityScores:
+        """从统一候选负载状态计算当前版本的 OSS。"""
+        used_nodes = self.collect_used_nodes(dnn_index, assignment)
+        used_physical_links = self.collect_used_physical_links(dnn_index, assignment)
+
         predicted_node_stability: Dict[int, float] = {}
-        predicted_node_fidelity: Dict[int, float] = {}
         for node_idx in used_nodes:
             node = self.nodes[node_idx]
             load = predicted_node_loads.get(node_idx, node.load_ratio)
-            heat = self.lambda_h * node.heat + (1.0 - self.lambda_h) * load
+            current_heat = (
+                base_node_heats.get(node_idx, node.heat)
+                if base_node_heats is not None
+                else node.heat
+            )
+            heat = self.lambda_h * current_heat + (1.0 - self.lambda_h) * load
             base_o = node.base_operational_stability
             predicted_o = base_o * math.exp(-self.alpha_r * load - self.beta_r * heat)
             predicted_node_stability[node_idx] = min(base_o, max(self.o_min, predicted_o))
 
-            base_a = node.base_inference_fidelity
-            predicted_a = base_a * math.exp(-self.alpha_a * load - self.beta_a * heat)
-            predicted_node_fidelity[node_idx] = min(base_a, max(self.a_min, predicted_a))
 
         predicted_link_stabilities: List[float] = []
         for physical_link in used_physical_links:
             load = predicted_physical_loads[physical_link]
-            heat = self.lambda_g * physical_link.heat + (1.0 - self.lambda_g) * load
+            current_heat = (
+                base_physical_heats.get(physical_link, physical_link.heat)
+                if base_physical_heats is not None
+                else physical_link.heat
+            )
+            heat = self.lambda_g * current_heat + (1.0 - self.lambda_g) * load
             base_stability = physical_link.base_transmission_stability
             predicted_stability = base_stability * math.exp(
                 -self.alpha_l * load - self.beta_l * heat
@@ -680,32 +1057,310 @@ class Environment:
         )
         raw_joint_product = math.prod(node_values) * math.prod(predicted_link_stabilities)
 
-        total_float = sum(task.float_num for task in dnn.tasks)
-        if total_float <= 0:
-            inference_fidelity = 0.0
-        else:
-            float_by_node: Dict[int, float] = {}
-            for task_idx, node_idx in enumerate(assignment):
-                float_by_node[node_idx] = (
-                    float_by_node.get(node_idx, 0.0) + dnn.tasks[task_idx].float_num
-                )
-            weighted_log_fidelity = sum(
-                (node_float / total_float)
-                * math.log(
-                    max(predicted_node_fidelity[node_idx], self.quality_log_epsilon)
-                )
-                for node_idx, node_float in float_by_node.items()
-            )
-            inference_fidelity = math.exp(weighted_log_fidelity)
-
         return CandidateQualityScores(
             operational_stability=operational_stability,
-            inference_fidelity=inference_fidelity,
             node_stability=node_stability,
             link_stability=link_stability,
             raw_joint_product=raw_joint_product,
             used_node_count=len(used_nodes),
             used_physical_link_count=len(used_physical_links),
+        )
+
+    def predict_candidate_state(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        observation_snapshot: ObservationSnapshot | None = None,
+        initial_delay_hint: float | None = None,
+    ) -> CandidateStateSnapshot:
+        """基于一个显式观测快照无副作用地预测完整候选接纳后状态。"""
+        dnn = self.ds[dnn_index]
+        if len(assignment) != len(dnn.tasks):
+            raise ValueError("assignment length must equal the DNN task count")
+        if any(node_idx < 0 or node_idx >= len(self.nodes) for node_idx in assignment):
+            raise ValueError("assignment contains an invalid node index")
+        snapshot = observation_snapshot or self.capture_observation_snapshot(
+            "online_admission"
+        )
+        if snapshot.topology_version != self.topology_version:
+            raise ValueError("observation topology_version is stale")
+        if len(snapshot.effective_bandwidths) != len(self.link_nodes):
+            raise ValueError("observation link count does not match the topology")
+
+        current_bandwidths = {
+            link: float(snapshot.effective_bandwidths[index])
+            for index, link in enumerate(self.link_nodes)
+        }
+        base_offered_rates = {
+            link: float(snapshot.directional_offered_rates[index])
+            for index, link in enumerate(self.link_nodes)
+            if snapshot.directional_offered_rates[index] > 0.0
+        }
+        physical_heat_by_link = {
+            physical_link: float(snapshot.physical_link_heats[index])
+            for index, physical_link in enumerate(self.physical_links)
+        }
+        node_heat_by_index = {
+            index: float(snapshot.node_heats[index])
+            for index in range(len(self.nodes))
+        }
+
+        added_cpu = [0.0 for _ in self.nodes]
+        total_cpu_need = 0.0
+        for task_index, node_index in enumerate(assignment):
+            need = float(dnn.tasks[task_index].cpu_need)
+            added_cpu[node_index] += need
+            total_cpu_need += need
+        predicted_node_cpu = tuple(
+            float(snapshot.node_available_cpu[index]) - added_cpu[index]
+            for index in range(len(self.nodes))
+        )
+        predicted_node_loads = {
+            index: float(snapshot.node_loads[index])
+            + added_cpu[index] / max(float(self.nodes[index].max_cpu), 1.0)
+            for index in range(len(self.nodes))
+            if snapshot.node_loads[index] > 0.0 or added_cpu[index] > 0.0
+        }
+
+        if initial_delay_hint is None:
+            delay = self.estimate_delay_from_assignment_with_bandwidths(
+                dnn_index,
+                assignment,
+                current_bandwidths,
+            )
+        else:
+            delay = max(float(initial_delay_hint), 0.0)
+        max_delay_seen = delay
+        bandwidths = current_bandwidths
+        converged = False
+        iterations = 0
+        relative_change = 0.0
+
+        for iteration in range(1, self.candidate_fixed_point_max_iterations + 1):
+            iterations = iteration
+            candidate_rates = self.directional_offered_rates_from_data(
+                self._collect_link_weights(dnn_index, assignment),
+                max(delay, self.slot_length, 1.0),
+            )
+            offered_rates = dict(base_offered_rates)
+            for link, rate in candidate_rates.items():
+                offered_rates[link] = offered_rates.get(link, 0.0) + rate
+            directional_loads = {
+                link: rate / max(bandwidths.get(link, 1.0), 1.0)
+                for link, rate in offered_rates.items()
+                if rate > 0.0
+            }
+            physical_loads = {
+                physical_link: max(
+                    (
+                        directional_loads.get(link, 0.0)
+                        for link in self._directed_links_by_physical_id[
+                            physical_link.physical_link_id
+                        ]
+                    ),
+                    default=0.0,
+                )
+                for physical_link in self.physical_links
+            }
+            predicted_heats = {
+                physical_link: (
+                    self.lambda_g * physical_heat_by_link[physical_link]
+                    + (1.0 - self.lambda_g) * physical_loads[physical_link]
+                )
+                for physical_link in self.physical_links
+            }
+            next_bandwidths = {
+                link: self._effective_bandwidth_from_predicted_state(
+                    link,
+                    directional_loads.get(link, 0.0),
+                    predicted_heats[link.physical_state],
+                )
+                for link in self.link_nodes
+            }
+            raw_delay = self.estimate_delay_from_assignment_with_bandwidths(
+                dnn_index,
+                assignment,
+                next_bandwidths,
+            )
+            next_delay = (
+                (1.0 - self.candidate_fixed_point_damping) * delay
+                + self.candidate_fixed_point_damping * raw_delay
+            )
+            max_delay_seen = max(max_delay_seen, raw_delay, next_delay)
+            relative_change = abs(next_delay - delay) / max(abs(delay), 1.0)
+            delay = next_delay
+            bandwidths = next_bandwidths
+            if relative_change <= self.candidate_fixed_point_relative_tolerance:
+                converged = True
+                break
+
+        if not converged:
+            delay = max_delay_seen
+
+        candidate_rates = self.directional_offered_rates_from_data(
+            self._collect_link_weights(dnn_index, assignment),
+            max(delay, self.slot_length, 1.0),
+        )
+        offered_rates = dict(base_offered_rates)
+        for link, rate in candidate_rates.items():
+            offered_rates[link] = offered_rates.get(link, 0.0) + rate
+        directional_loads = {
+            link: rate / max(bandwidths.get(link, 1.0), 1.0)
+            for link, rate in offered_rates.items()
+            if rate > 0.0
+        }
+        physical_loads = {
+            physical_link: max(
+                (
+                    directional_loads.get(link, 0.0)
+                    for link in self._directed_links_by_physical_id[
+                        physical_link.physical_link_id
+                    ]
+                ),
+                default=0.0,
+            )
+            for physical_link in self.physical_links
+        }
+        predicted_heats = {
+            physical_link: (
+                self.lambda_g * physical_heat_by_link[physical_link]
+                + (1.0 - self.lambda_g) * physical_loads[physical_link]
+            )
+            for physical_link in self.physical_links
+        }
+        bandwidths = {
+            link: self._effective_bandwidth_from_predicted_state(
+                link,
+                directional_loads.get(link, 0.0),
+                predicted_heats[link.physical_state],
+            )
+            for link in self.link_nodes
+        }
+
+        quality_scores = self._quality_scores_from_predicted_loads(
+            dnn_index,
+            assignment,
+            predicted_node_loads,
+            physical_loads,
+            node_heat_by_index,
+            physical_heat_by_link,
+        )
+        service_exposure_slots = self.service_exposure_slots(delay)
+        node_availability, availability_confidence = (
+            self.aggregate_candidate_availability(
+                dnn_index,
+                assignment,
+                service_exposure_slots,
+                snapshot,
+            )
+        )
+        if self.uses_periodic_semantics:
+            operational_stability = self._aggregate_operational_stability(
+                node_availability,
+                quality_scores.link_stability,
+            )
+            quality_scores = CandidateQualityScores(
+                operational_stability=operational_stability,
+                node_stability=node_availability,
+                link_stability=quality_scores.link_stability,
+                raw_joint_product=node_availability
+                * (quality_scores.link_stability or 1.0),
+                used_node_count=quality_scores.used_node_count,
+                used_physical_link_count=quality_scores.used_physical_link_count,
+            )
+        total_energy = float(
+            self.count_total_energy_by_assignment(dnn_index, assignment)
+        )
+        deadline = max(float(dnn.delay), 1.0)
+        delay_violation = max(0.0, delay - deadline) / deadline
+        resource_overload = sum(max(0.0, -cpu) for cpu in predicted_node_cpu)
+        resource_violation = resource_overload / max(total_cpu_need, 1.0)
+
+        hierarchy_bad = 0
+        hierarchy_total = 0
+        task_index_by_id = {id(task): index for index, task in enumerate(dnn.tasks)}
+        for task_index, node_index in enumerate(assignment):
+            if self.nodes[node_index].level == 1 and node_index != dnn.initiateNode:
+                hierarchy_bad += 1
+            hierarchy_total += 1
+            for link in dnn.links:
+                if link.e_task is not dnn.tasks[task_index]:
+                    continue
+                hierarchy_total += 1
+                predecessor = task_index_by_id[id(link.s_task)]
+                if self.nodes[node_index].level < self.nodes[assignment[predecessor]].level:
+                    hierarchy_bad += 1
+        hierarchy_violation = hierarchy_bad / max(hierarchy_total, 1)
+        link_overload = [
+            max(0.0, load - 1.0)
+            for load in directional_loads.values()
+        ]
+        link_violation = sum(link_overload) / max(len(link_overload), 1)
+        used_nodes = self.collect_used_nodes(dnn_index, assignment)
+        offline_nodes = [
+            node_index
+            for node_index in used_nodes
+            if not snapshot.node_online[node_index]
+        ]
+        availability_violation = len(offline_nodes) / max(len(used_nodes), 1)
+        constraint_violation = (
+            delay_violation
+            + resource_violation
+            + hierarchy_violation
+            + link_violation
+            + availability_violation
+        )
+        violations = []
+        if offline_nodes:
+            violations.append("node_offline")
+        if resource_overload > 0.0:
+            violations.append("insufficient_cpu")
+        if hierarchy_bad:
+            violations.append("hierarchy_violation")
+        if any(value > 0.0 for value in link_overload):
+            violations.append("link_overload")
+        if delay > deadline:
+            violations.append("deadline_violation")
+
+        delay_satisfaction = max(0.0, min(1.0, (deadline - delay) / deadline))
+        energy_satisfaction = self.energy_satisfaction(dnn_index, total_energy)
+        return CandidateStateSnapshot(
+            observation_snapshot_version=snapshot.snapshot_version,
+            environment_state_version=snapshot.environment_state_version,
+            assignment=tuple(assignment),
+            predicted_node_cpu=predicted_node_cpu,
+            directional_offered_rates=tuple(
+                offered_rates.get(link, 0.0) for link in self.link_nodes
+            ),
+            directional_link_loads=tuple(
+                directional_loads.get(link, 0.0) for link in self.link_nodes
+            ),
+            physical_link_loads=tuple(
+                physical_loads[physical_link] for physical_link in self.physical_links
+            ),
+            predicted_link_heats=tuple(
+                predicted_heats[physical_link] for physical_link in self.physical_links
+            ),
+            predicted_effective_bandwidths=tuple(
+                bandwidths[link] for link in self.link_nodes
+            ),
+            estimated_delay_ms=float(delay),
+            total_energy=total_energy,
+            node_stability_score=quality_scores.node_stability,
+            node_availability_score=node_availability,
+            service_exposure_slots=service_exposure_slots,
+            availability_prediction_confidence=availability_confidence,
+            link_stability_score=quality_scores.link_stability,
+            operational_stability=quality_scores.operational_stability,
+            delay_satisfaction=delay_satisfaction,
+            energy_satisfaction=energy_satisfaction,
+            raw_joint_product=quality_scores.raw_joint_product,
+            deadline_feasible=delay <= deadline,
+            fixed_point_converged=converged,
+            fixed_point_iterations=iterations,
+            fixed_point_relative_residual=float(relative_change),
+            constraint_violation=constraint_violation,
+            constraint_violations=tuple(violations),
         )
 
     def add_running_dnn(
@@ -726,6 +1381,7 @@ class Environment:
         # 接纳成功后立即把新 DNN 纳入当前占用，
         # 但热度和动态可靠性仍然只在时隙推进时更新。
         self.allocate_running_resources()
+        self.environment_state_version += 1
         if self.verbose:
             print(
                 "[ACCEPTED] "
@@ -735,6 +1391,35 @@ class Environment:
                 f"required_slots={remaining_slots}"
             )
         return running_dnn
+
+    def commit_assignment(
+        self,
+        dnn_index: int,
+        assignment: List[int],
+        expected_environment_state_version: int,
+    ) -> CandidateStateSnapshot:
+        """在版本一致时最终复验并原子注册一个运行请求。"""
+        with self._commit_lock:
+            if self.environment_state_version != expected_environment_state_version:
+                raise StaleEnvironmentStateError(
+                    "environment changed after online candidate evaluation"
+                )
+            snapshot = self.capture_observation_snapshot("online_admission")
+            candidate = self.predict_candidate_state(dnn_index, assignment, snapshot)
+            if not candidate.is_strictly_feasible:
+                reasons = ",".join(candidate.constraint_violations) or "constraint_violation"
+                raise InfeasibleAssignmentError(reasons)
+            if self.environment_state_version != expected_environment_state_version:
+                raise StaleEnvironmentStateError(
+                    "environment changed during final candidate revalidation"
+                )
+            self.add_running_dnn(
+                dnn_index=dnn_index,
+                assignment=assignment,
+                estimated_runtime=candidate.estimated_delay_ms,
+                remaining_slots=candidate.service_exposure_slots,
+            )
+            return candidate
 
     def advance_time_slot(self) -> None:
         """推进一个离散时隙并刷新系统动态状态。"""
@@ -751,8 +1436,10 @@ class Environment:
                 running_dnn.remaining_slots -= 1
         finished_count = sum(1 for running_dnn in self.running_dnns if running_dnn.remaining_slots <= 0)
         self.release_finished_dnns()
+        self.update_node_availability()
         self._print_slot_summary(slot_id, finished_count)
         self.current_slot += 1
+        self.environment_state_version += 1
 
     def release_finished_dnns(self) -> None:
         """移除已完成的运行块并释放其占用资源。"""
@@ -765,6 +1452,18 @@ class Environment:
             active.append(running_dnn)
         self.running_dnns = active
         self.allocate_running_resources()
+
+    def abort_running_dnn(self, dnn_index: int) -> bool:
+        """因执行期节点故障终止一个运行请求并立即释放资源。"""
+        for index, running_dnn in enumerate(self.running_dnns):
+            if running_dnn.dnn_index != dnn_index:
+                continue
+            self.free_running_resources(running_dnn)
+            del self.running_dnns[index]
+            self.allocate_running_resources()
+            self.environment_state_version += 1
+            return True
+        return False
 
     def allocate_running_resources(self) -> None:
         """按运行队列统一回填节点和链路占用状态。"""
@@ -793,18 +1492,10 @@ class Environment:
 
     def update_link_loads(self) -> None:
         """根据运行队列重算各链路当前负载率。"""
-        used_bandwidth: Dict[int, float] = {id(link): 0.0 for link in self.link_nodes}
-        for running_dnn in self.running_dnns:
-            # 简化模型把链路数据量按估计运行时长均摊，
-            # 而不是显式做逐包级别的传输仿真。
-            runtime = max(running_dnn.estimated_runtime, self.slot_length, 1.0)
-            link_weights = self._collect_link_weights(running_dnn.dnn_index, running_dnn.assignment)
-            for link, data_amount in link_weights.items():
-                used_bandwidth[id(link)] += data_amount / runtime
+        offered_rates = self.aggregate_directional_offered_rates()
+        directional_loads = self.directional_load_ratios_from_offered_rates(offered_rates)
         for link in self.link_nodes:
-            current_used = used_bandwidth.get(id(link), 0.0)
-            bandwidth = max(self.get_effective_bandwidth(link), 1.0)
-            link.load_ratio = current_used / bandwidth
+            link.load_ratio = directional_loads.get(link, 0.0)
         physical_loads = self._physical_load_ratios_from_directional()
         for physical_link, load_ratio in physical_loads.items():
             physical_link.load_ratio = load_ratio
@@ -823,16 +1514,13 @@ class Environment:
             )
 
     def refresh_dynamic_stability(self) -> None:
-        """依据负载和历史压力刷新节点与链路的动态质量分数。"""
-        # 质量分数由经验先验和当前负载/历史压力共同决定，
+        """依据负载和历史压力刷新节点与链路的动态稳定性。"""
+        # 稳定性由经验先验和当前负载/历史压力共同决定，
         # 同时做上下界裁剪，避免高于先验或低于下界。
         for node in self.nodes:
             base_o = node.base_operational_stability
-            base_a = node.base_inference_fidelity
             next_o = base_o * math.exp(-self.alpha_r * node.load_ratio - self.beta_r * node.heat)
-            next_a = base_a * math.exp(-self.alpha_a * node.load_ratio - self.beta_a * node.heat)
             node.operational_stability = min(base_o, max(self.o_min, next_o))
-            node.inference_fidelity = min(base_a, max(self.a_min, next_a))
         for physical_link in self.physical_links:
             next_stability = physical_link.base_transmission_stability * math.exp(
                 -self.alpha_l * physical_link.load_ratio
@@ -926,47 +1614,18 @@ class Environment:
             self.count_link_stability_by_assignment(dnn_index, assignment),
         )
 
-    def count_inference_fidelity_by_assignment(
-        self,
-        dnn_index: int,
-        assignment: List[int],
-    ) -> float:
-        """按节点承载 FLOPs 权重计算当前 IFS。"""
-        dnn = self.ds[dnn_index]
-        total_float = sum(task.float_num for task in dnn.tasks)
-        if total_float <= 0:
-            return 0.0
-        float_by_node: Dict[int, float] = {}
-        for task_idx, node_idx in enumerate(assignment):
-            float_by_node[node_idx] = float_by_node.get(node_idx, 0.0) + dnn.tasks[task_idx].float_num
-        weighted_log_sum = sum(
-            (node_float / total_float)
-            * math.log(
-                max(self.nodes[node_idx].inference_fidelity, self.quality_log_epsilon)
-            )
-            for node_idx, node_float in float_by_node.items()
-        )
-        return math.exp(weighted_log_sum)
-
     def evaluate_post_admission_metrics(
         self,
         dnn_index: int,
         assignment: List[int],
     ) -> PostAdmissionMetrics:
-        """按候选接纳后的预测状态统一计算四类指标。"""
-        delay = self.estimate_delay_from_assignment(dnn_index, assignment)
-        scores = self.predict_candidate_scores_by_assignment(
-            dnn_index,
-            assignment,
-            delay,
-        )
-        energy = self.count_total_energy_by_assignment(dnn_index, assignment)
+        """按候选接纳后的预测状态统一计算三类指标。"""
+        candidate = self.predict_candidate_state(dnn_index, assignment)
         return PostAdmissionMetrics(
-            delay=delay,
-            operational_stability=scores.operational_stability,
-            inference_fidelity=scores.inference_fidelity,
-            total_energy=energy,
-            raw_joint_product=scores.raw_joint_product,
+            delay=candidate.estimated_delay_ms,
+            operational_stability=candidate.operational_stability,
+            total_energy=candidate.total_energy,
+            raw_joint_product=candidate.raw_joint_product,
         )
 
     def check_delay_random(self, dnn: DNN, x: List[List[int]]) -> bool:
@@ -1214,32 +1873,43 @@ class Environment:
         return delay_costs
 
     def generate_availability(self) -> List[int]:
-        """推进节点在线状态并返回当前可用性快照。"""
-        availability = [0 for _ in range(self.availability_node_count)]
-        for j in range(self.availability_node_count):
-            if self.up[j]:
-                if self.remaining_time[j] > 0:
-                    self.remaining_time[j] -= 1
+        """兼容 RTBL：只读取当前状态，不在算法调用处推进故障过程。"""
+        return [1 if self.up[index] else 0 for index in range(self.availability_node_count)]
+
+    def update_node_availability(self) -> None:
+        """在系统时隙边界统一推进一次节点可用性状态机。"""
+        for index, node in enumerate(self.nodes):
+            if node.availability_mode == "always_on":
+                self.up[index] = True
+            elif self.up[index]:
+                if self.remaining_time[index] > 0:
+                    self.remaining_time[index] -= 1
                 else:
-                    self.up[j] = False
-                    self.remaining_time[j] = self._sample_downtime()
+                    self.up[index] = False
+                    self.remaining_time[index] = self._sample_downtime()
+            elif self.remaining_time[index] > 0:
+                self.remaining_time[index] -= 1
             else:
-                if self.remaining_time[j] > 0:
-                    self.remaining_time[j] -= 1
-                else:
-                    self.up[j] = True
-                    self.remaining_time[j] = self._sample_uptime()
-            availability[j] = 1 if self.up[j] else 0
-        return availability
+                self.up[index] = True
+                self.remaining_time[index] = self._sample_uptime()
+            self.rj_history[index].append(1 if self.up[index] else 0)
+            overflow = len(self.rj_history[index]) - self.availability_history_limit
+            if overflow > 0:
+                del self.rj_history[index][:overflow]
 
     def _generate_rj_history(self) -> List[List[int]]:
         """生成一段离线可用性历史供 RTBL 初始化。"""
-        history = [[] for _ in range(self.availability_node_count)]
-        up_virtual = [True for _ in range(self.availability_node_count)]
-        rem_virtual = [self._sample_uptime() for _ in range(self.availability_node_count)]
+        history = [[] for _ in self.nodes]
+        up_virtual = [True for _ in self.nodes]
+        rem_virtual = [
+            self._sample_uptime() if node.availability_mode == "stochastic" else 0
+            for node in self.nodes
+        ]
         for _ in range(self.h_off):
-            snapshot = [0 for _ in range(self.availability_node_count)]
-            for j in range(self.availability_node_count):
+            snapshot = [1 for _ in self.nodes]
+            for j, node in enumerate(self.nodes):
+                if node.availability_mode == "always_on":
+                    continue
                 if up_virtual[j]:
                     if rem_virtual[j] > 0:
                         rem_virtual[j] -= 1
@@ -1253,18 +1923,18 @@ class Environment:
                         up_virtual[j] = True
                         rem_virtual[j] = self._sample_uptime()
                 snapshot[j] = 1 if up_virtual[j] else 0
-            for j in range(self.availability_node_count):
+            for j in range(len(self.nodes)):
                 history[j].append(snapshot[j])
         return history
 
     def _sample_uptime(self) -> int:
         """按 Weibull 分布采样在线时长。"""
-        u = random.random()
+        u = self._availability_rng.random()
         return int(self.scale * math.pow(-math.log(1 - u), 1.0 / self.shape))
 
     def _sample_downtime(self) -> int:
         """按对数正态分布采样离线时长。"""
-        u = random.random()
-        v = random.random()
+        u = self._availability_rng.random()
+        v = self._availability_rng.random()
         z = math.sqrt(-2.0 * math.log(u)) * math.cos(2.0 * math.pi * v)
         return int(math.exp(self.mean + self.sigma * z))

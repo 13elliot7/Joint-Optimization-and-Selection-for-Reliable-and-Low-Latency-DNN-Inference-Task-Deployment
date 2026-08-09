@@ -1,0 +1,9 @@
+{
+  "validation_version": "converged_output_validation_v1",
+  "valid": true,
+  "formal_complete": false,
+  "row_count": 226,
+  "expected_runs": null,
+  "failures": [],
+  "validated_at": "2026-08-09T03:52:43.719154+00:00"
+}

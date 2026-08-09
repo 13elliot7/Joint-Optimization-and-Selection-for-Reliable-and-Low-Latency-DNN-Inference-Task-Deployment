@@ -1,0 +1,44 @@
+{
+  "verified": true,
+  "verified_files": 40,
+  "manifest_files": 40,
+  "failures": [],
+  "verified_at": "2026-08-09T01:52:29.152256+00:00",
+  "removed_result_roots": [
+    "experiment_results",
+    "periodic_experiment_results",
+    "periodic_experiment_results_v2",
+    "periodic_experiment_results_v3"
+  ],
+  "removed_generated_figure_files": [
+    "plot/figures/fig_ablation.pdf",
+    "plot/figures/fig_ablation.svg",
+    "plot/figures/fig_dynamic_degradation.pdf",
+    "plot/figures/fig_dynamic_degradation.svg",
+    "plot/figures/fig_overall_delay_energy.pdf",
+    "plot/figures/fig_overall_delay_energy.svg",
+    "plot/figures/fig_overall_failure_runtime.pdf",
+    "plot/figures/fig_overall_failure_runtime.svg",
+    "plot/figures/fig_overall_reliability.pdf",
+    "plot/figures/fig_overall_reliability.svg",
+    "plot/figures/fig_param_iteration.pdf",
+    "plot/figures/fig_param_iteration.svg",
+    "plot/figures/fig_param_mutation.pdf",
+    "plot/figures/fig_param_mutation.svg",
+    "plot/figures/fig_param_population.pdf",
+    "plot/figures/fig_param_population.svg",
+    "plot/figures/fig_pareto_3d.pdf",
+    "plot/figures/fig_pareto_3d.svg",
+    "plot/figures/fig_pareto_hv.pdf",
+    "plot/figures/fig_pareto_hv.svg",
+    "plot/figures/fig_preference.pdf",
+    "plot/figures/fig_preference.svg",
+    "plot/figures/fig_scale.pdf",
+    "plot/figures/fig_scale.svg",
+    "plot/figures/manifest.json"
+  ],
+  "reference_assets_preserved": [
+    "plot/figures/reference figures"
+  ],
+  "deleted_at": "2026-08-09T01:52:29.162860+00:00"
+}

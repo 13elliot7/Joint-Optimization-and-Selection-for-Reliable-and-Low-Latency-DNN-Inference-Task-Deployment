@@ -50,7 +50,6 @@ VARIANT_ORDER = tuple(VARIANT_LABELS.values())
 
 METRIC_LABELS = {
     "avg_operational_stability_score": "Operational stability score",
-    "avg_inference_fidelity_score": "Inference fidelity score",
     "avg_estimated_delay": "Delay (ms)",
     "avg_total_energy": "Energy",
     "rejected_or_failed_count": "Failed deployments",
@@ -240,7 +239,7 @@ def draw_line_panel(
         (mean(r, metric.key) + std(r, metric.key) for r in rows if algorithm_label(r["algorithm"]) in algorithms),
         default=1.0,
     )
-    if "stability" in metric.key or "fidelity" in metric.key:
+    if "stability" in metric.key:
         raw_min = min((mean(r, metric.key) - std(r, metric.key) for r in rows), default=0.0)
         raw_max = max((mean(r, metric.key) + std(r, metric.key) for r in rows), default=1.0)
         y_min = max(0.0, math.floor(max(0.0, raw_min - 0.02) * 20) / 20)
@@ -502,7 +501,6 @@ def make_sensitivity_figures(written: list[Path]) -> None:
     ]
     metrics = [
         MetricSpec("avg_operational_stability_score", "OSS"),
-        MetricSpec("avg_inference_fidelity_score", "IFS"),
         MetricSpec("avg_total_energy", "Energy"),
         MetricSpec("rejected_or_failed_count", "Failed"),
         MetricSpec("runtime_ms", "Runtime (ms)"),
@@ -523,7 +521,6 @@ def make_overall_figures(written: list[Path]) -> None:
             "Average Deployment Quality under Different DNN Request Numbers",
             [
                 MetricSpec("avg_operational_stability_score", "OSS"),
-                MetricSpec("avg_inference_fidelity_score", "IFS"),
             ],
         ),
         (
@@ -554,7 +551,7 @@ def make_pareto_figures(written: list[Path]) -> None:
         make_multi_bar_figure(
             rows,
             OUTPUT_DIR / "fig_pareto_hv.svg",
-            "Four-Objective Pareto Front Quality Comparison",
+            "Three-Objective Pareto Front Quality Comparison",
             [
                 MetricSpec("pareto_hypervolume", "Hypervolume"),
                 MetricSpec("pareto_point_count_mean", "Pareto points/request"),
@@ -570,7 +567,6 @@ def make_pareto_figures(written: list[Path]) -> None:
 
 def make_pareto_3d(rows: Sequence[dict[str, str]], path: Path) -> Path:
     metrics = (
-        "inference_fidelity_norm",
         "operational_stability_norm",
         "delay_norm",
         "energy_norm",
@@ -583,7 +579,7 @@ def make_pareto_3d(rows: Sequence[dict[str, str]], path: Path) -> Path:
         and row.get("dnn_index") not in (None, "")
     ]
     if not valid_rows:
-        raise ValueError("Pareto projection requires repeat, dnn_index, and four normalized objectives")
+        raise ValueError("Pareto projection requires repeat, dnn_index, and three normalized objectives")
 
     # A Pareto front is defined for one optimization problem. Select the shared
     # repeat/request pair with the median combined set size as a reproducible,
@@ -634,14 +630,14 @@ def make_pareto_3d(rows: Sequence[dict[str, str]], path: Path) -> Path:
     def upper_tenth(values: Sequence[float]) -> float:
         return min(1.0, max(0.1, math.ceil(max(values) * 10 - 1e-9) / 10))
 
-    fidelity_values = [fnum(row["inference_fidelity_norm"]) for row in points]
+    stability_values = [fnum(row["operational_stability_norm"]) for row in points]
     axis_bounds = (
         (
-            max(0.0, min(0.9, math.floor(min(fidelity_values) * 10) / 10)),
+            max(0.0, min(0.9, math.floor(min(stability_values) * 10) / 10)),
             1.0,
         ),
-        (0.0, upper_tenth([fnum(row["operational_stability_norm"]) for row in points])),
         (0.0, upper_tenth([fnum(row["delay_norm"]) for row in points])),
+        (0.0, upper_tenth([fnum(row["energy_norm"]) for row in points])),
     )
     energy_values = [fnum(row["energy_norm"]) for row in points]
     energy_bounds = (
@@ -671,7 +667,7 @@ def make_pareto_3d(rows: Sequence[dict[str, str]], path: Path) -> Path:
     panel_positions = ((15.0, 72.0), (570.0, 72.0), (15.0, 382.0), (570.0, 382.0))
     parts = [
         f'<text class="title" x="{width / 2}" y="27" text-anchor="middle">'
-        "Four-objective Nondominated Sets: Energy-encoded 3D Projection</text>",
+        "Three-objective Nondominated Sets: 3D Projection</text>",
         f'<text class="tick" x="{width / 2}" y="48" text-anchor="middle">'
         f"Median-size matched case: repeat {selected_repeat}, DNN request {selected_dnn}; "
         "larger values are better</text>",
@@ -682,8 +678,8 @@ def make_pareto_3d(rows: Sequence[dict[str, str]], path: Path) -> Path:
             break
         panel_x, panel_y = panel_positions[panel_index]
         algorithm_points = [row for row in points if row["algorithm"] == algorithm]
-        # Symmetric axonometric projection: operational stability is vertical,
-        # while inference fidelity and delay recede in opposite directions. A complete
+        # Symmetric axonometric projection: delay satisfaction is vertical,
+        # while operational stability and energy recede in opposite directions. A complete
         # cube is drawn below so depth remains legible in a static paper figure.
         origin = (panel_x + 255.0, panel_y + 250.0)
         x_vec = (175.0, -42.0)
@@ -753,8 +749,7 @@ def make_pareto_3d(rows: Sequence[dict[str, str]], path: Path) -> Path:
         polygon(((0.0, 0.0, 1.0), (1.0, 0.0, 1.0), (1.0, 1.0, 1.0), (0.0, 1.0, 1.0)), "#f8fafc")
 
         for grid_value in (0.25, 0.5, 0.75):
-            # Floor (fidelity-delay), left wall (stability-delay), and rear wall
-            # (fidelity-stability) use the same normalized grid spacing.
+            # All three coordinate planes use the same normalized grid spacing.
             grid_line((grid_value, 0.0, 0.0), (grid_value, 0.0, 1.0))
             grid_line((0.0, 0.0, grid_value), (1.0, 0.0, grid_value))
             grid_line((0.0, grid_value, 0.0), (0.0, grid_value, 1.0))
@@ -785,9 +780,9 @@ def make_pareto_3d(rows: Sequence[dict[str, str]], path: Path) -> Path:
             )
 
         axes = (
-            (0, axis_bounds[0], (1.0, 0.0, 0.0), "Inference fidelity"),
-            (1, axis_bounds[1], (0.0, 1.0, 0.0), "Operational stability"),
-            (2, axis_bounds[2], (0.0, 0.0, 1.0), "Delay satisfaction"),
+            (0, axis_bounds[0], (1.0, 0.0, 0.0), "Operational stability"),
+            (1, axis_bounds[1], (0.0, 1.0, 0.0), "Delay satisfaction"),
+            (2, axis_bounds[2], (0.0, 0.0, 1.0), "Energy satisfaction"),
         )
         for axis_index, bounds, normalized_end, label in axes:
             x2, y2 = project_normalized(*normalized_end)
@@ -822,17 +817,17 @@ def make_pareto_3d(rows: Sequence[dict[str, str]], path: Path) -> Path:
             key=lambda row: (
                 id(row) in reference_ids,
                 project(
-                    fnum(row["inference_fidelity_norm"]),
                     fnum(row["operational_stability_norm"]),
                     fnum(row["delay_norm"]),
+                    fnum(row["energy_norm"]),
                 )[1],
             ),
         )
         for row in ordered_points:
             xx, yy = project(
-                fnum(row["inference_fidelity_norm"]),
                 fnum(row["operational_stability_norm"]),
                 fnum(row["delay_norm"]),
+                fnum(row["energy_norm"]),
             )
             is_reference = id(row) in reference_ids
             if is_reference:
@@ -909,7 +904,6 @@ def make_dynamic_figure(written: list[Path]) -> None:
             "Performance under Dynamic Quality Degradation",
             [
                 MetricSpec("avg_operational_stability_score", "OSS"),
-                MetricSpec("avg_inference_fidelity_score", "IFS"),
                 MetricSpec("avg_total_energy", "Energy"),
                 MetricSpec("rejected_or_failed_count", "Failed"),
             ],
@@ -933,7 +927,6 @@ def make_ablation_figure(written: list[Path]) -> None:
             "Ablation Study of DAREED Components",
             [
                 MetricSpec("avg_operational_stability_score", "OSS"),
-                MetricSpec("avg_inference_fidelity_score", "IFS"),
                 MetricSpec("avg_total_energy", "Energy"),
                 MetricSpec("rejected_or_failed_count", "Failed"),
             ],
@@ -971,7 +964,6 @@ def make_preference_figure(written: list[Path]) -> None:
     metrics = [
         ("Delay utility", "avg_estimated_delay", False),
         ("OSS", "avg_operational_stability_score", True),
-        ("IFS", "avg_inference_fidelity_score", True),
         ("Energy utility", "avg_total_energy", False),
     ]
     values = {label: [] for label in order}

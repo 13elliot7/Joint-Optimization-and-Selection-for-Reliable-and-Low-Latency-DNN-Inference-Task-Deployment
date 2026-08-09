@@ -1,0 +1,38 @@
+{
+  "manifest_version": "converged_experiment_manifest_v1",
+  "experiment_layer": "system_poisson",
+  "suite": "generator_ablation",
+  "scenario_count": 3,
+  "scenario_hashes": [
+    "8f1d4e595c4d2f82",
+    "6a3fe36af372961f",
+    "974ffbc424a95fdb"
+  ],
+  "repeats": 20,
+  "base_seed": 20260719,
+  "timing_mode": "measured",
+  "semantic_versions": {
+    "objective_semantics_version": "stability_delay_energy_v4",
+    "candidate_prediction_version": "unified_fixed_point_v3",
+    "observation_semantics_version": "explicit_snapshot_v1",
+    "workload_semantics_version": "poisson_profile_catalog_v1",
+    "planning_semantics_version": "periodic_repository_v1",
+    "candidate_generator_version": "customized_periodic_pool_v1",
+    "availability_estimator_version": "empirical_window_beta_v1",
+    "availability_model_version": "slot_up_down_v1",
+    "runtime_progress_mode": "fixed_service_time_v1",
+    "routing_mode": "fixed_path_v1",
+    "duplex_mode": "full_duplex_shared_heat_v1",
+    "energy_model_version": "deployment_return_energy_v1",
+    "result_schema_version": "periodic_three_objective_v3",
+    "joint_budget_control_version": "discrete_mpc_v1",
+    "joint_action_space_version": "grid_tkb_v1",
+    "pool_allocation_version": "arrival_risk_diversity_v1",
+    "online_anytime_revalidation_version": "budgeted_fixed_point_v1",
+    "action_predictor_version": "regularized_surrogate_v1",
+    "control_objective_version": "goodput_cost_v1"
+  },
+  "formal": false,
+  "git_revision": "6e50e08aaeef712c1154d15a02149aefc11d1485",
+  "created_at": "2026-08-09T03:21:27.558661+00:00"
+}

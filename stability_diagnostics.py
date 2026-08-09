@@ -114,8 +114,6 @@ def _run_algorithm(args: argparse.Namespace) -> tuple[List[Dict[str, Any]], Any]
         t_max=args.tmax,
         alpha_r=args.alpha_r,
         beta_r=args.beta_r,
-        alpha_a=args.alpha_a,
-        beta_a=args.beta_a,
         alpha_l=args.alpha_l,
         beta_l=args.beta_l,
         lambda_h=args.lambda_h,
@@ -208,8 +206,6 @@ def main() -> None:
     parser.add_argument("--crossover-probability", type=float, default=0.50)
     parser.add_argument("--alpha-r", type=float, default=0.80)
     parser.add_argument("--beta-r", type=float, default=0.50)
-    parser.add_argument("--alpha-a", type=float, default=0.50)
-    parser.add_argument("--beta-a", type=float, default=0.30)
     parser.add_argument("--alpha-l", type=float, default=0.70)
     parser.add_argument("--beta-l", type=float, default=0.40)
     parser.add_argument("--lambda-h", type=float, default=0.70)

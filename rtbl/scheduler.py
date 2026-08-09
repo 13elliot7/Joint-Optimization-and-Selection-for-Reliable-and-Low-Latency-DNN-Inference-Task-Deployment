@@ -17,7 +17,6 @@ class RTBLScheduler:
         self.env = env
         self.m = config.M
         self.v = config.V_range
-        self.lambda_a = config.lambda_a
         self.lambda_r = config.lambda_r
         self.r_min = config.r_min
         self.r_max = config.r_max
@@ -28,7 +27,7 @@ class RTBLScheduler:
         self.hj = [0 for _ in range(self.m)]
         self.rj_bar = self._initialize_rj_bar(rj_history)
         self.rj_tilde = [self.r_min for _ in range(self.m)]
-        self.selector = SOTASelector(self.m, self.lambda_a, self.lambda_r, self.v)
+        self.selector = SOTASelector(self.m, self.lambda_r, self.v)
 
     def _initialize_rj_bar(self, rj_history: List[List[int]]) -> List[float]:
         """根据历史可用性样本初始化经验均值。"""
@@ -53,12 +52,12 @@ class RTBLScheduler:
         dnn_budget = min(float(self.d_bug), float(self.env.ds[dnn_index].delay))
         return dnn_budget / task_count
 
-    def step(self, dnn_index: int, task_index: int, x: List[List[int]], a_j: List[float], rj_t: List[int]) -> List[int] | None:
+    def step(self, dnn_index: int, task_index: int, x: List[List[int]], rj_t: List[int]) -> List[int] | None:
         """为当前任务选择一个满足约束的节点集合。"""
         self.decision_round += 1
         self.update_rj_tilde(self.decision_round)
         d_j = self.env.calculate_task_delay_costs(dnn_index, task_index, x)
-        xij_t = self.selector.select_multiple(a_j, self.rj_tilde, self.q, d_j, self.env.ds[dnn_index].delay)
+        xij_t = self.selector.select_multiple(self.rj_tilde, self.q, d_j, self.env.ds[dnn_index].delay)
         xj_t = [0 for _ in range(self.m)]
         selected_i = 10
         for i in range(10):
@@ -122,12 +121,9 @@ class RTBLRunner:
         task_num = len(self.env.ds[dnn_index].tasks)
         x = [[0 for _ in range(len(self.env.nodes))] for _ in range(task_num)]
         assignment = [-1 for _ in range(self.env.max_dnn_num)]
-        a_j = [0.0 for _ in range(self.config.M)]
         rj_t = self.env.generate_availability()
-        for j in range(self.config.M):
-            a_j[j] = self.env.nodes[j].inference_fidelity
         for task_index in range(task_num):
-            x_i = self.scheduler.step(dnn_index, task_index, x, a_j, rj_t)
+            x_i = self.scheduler.step(dnn_index, task_index, x, rj_t)
             if x_i is None:
                 return None
             for node_index in range(self.config.M):
@@ -143,7 +139,6 @@ class RTBLRunner:
         run_time = time.monotonic()
         t_res = 0.0
         r_res = 0.0
-        a_res = 0.0
         e_res = 0.0
         failure_dnn = 0
         success_dnn = 0
@@ -170,9 +165,8 @@ class RTBLRunner:
             )
             delay = post_admission.delay
             operational_stability = post_admission.operational_stability
-            inference_fidelity = post_admission.inference_fidelity
             total_energy = post_admission.total_energy
-            remaining_slots = max(1, math.ceil(delay / self.env.slot_length))
+            remaining_slots = self.env.service_exposure_slots(delay)
             self.env.add_running_dnn(
                 dnn_index=dnn_index,
                 assignment=assignment_slice,
@@ -181,7 +175,6 @@ class RTBLRunner:
             )
             t_res += delay
             r_res += operational_stability
-            a_res += inference_fidelity
             e_res += total_energy
             success_dnn += 1
             next_dnn_index += 1
@@ -191,7 +184,6 @@ class RTBLRunner:
         return ExperimentMetrics(
             avg_delay=t_res / success_dnn if success_dnn else 0.0,
             avg_operational_stability_score=r_res / success_dnn if success_dnn else 0.0,
-            avg_inference_fidelity_score=a_res / success_dnn if success_dnn else 0.0,
             avg_energy=e_res / success_dnn if success_dnn else 0.0,
             failure_count=failure_dnn,
             runtime_ms=int((time.monotonic() - run_time) * 1000),

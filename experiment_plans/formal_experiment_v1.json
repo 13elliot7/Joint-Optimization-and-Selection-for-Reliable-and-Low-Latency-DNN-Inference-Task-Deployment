@@ -1,0 +1,30 @@
+{
+  "plan_version": "formal_experiment_v1",
+  "description": "Five-module converged experiment plan",
+  "suites": [
+    "search_quality",
+    "load",
+    "algorithm_baseline",
+    "robustness",
+    "scale"
+  ],
+  "repeats": 20,
+  "base_seed": 20260719,
+  "output_root": "results",
+  "search_quality": {
+    "instances": 30
+  },
+  "system_poisson": {
+    "slots": 200,
+    "slot_length_ms": 100.0,
+    "lambda_values": [0.1, 0.25, 0.5, 1.0, 2.0],
+    "reference_lambda": 1.0,
+    "online_timing_mode": "measured",
+    "planning_timing_mode": "measured"
+  },
+  "statistics": {
+    "confidence_level": 0.95,
+    "paired": true,
+    "minimum_formal_repeats": 20
+  }
+}
